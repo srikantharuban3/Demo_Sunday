@@ -1,0 +1,236 @@
+name: AI-Powered Test Execution
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  ai-test-execution:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install Playwright
+      run: |
+        npm init -y
+        npm install playwright @playwright/test
+        npx playwright install
+        
+    - name: Install AI Test Runner
+      run: |
+        npm install openai
+        npm install @anthropic-ai/sdk
+        
+    - name: Create AI Test Executor
+      run: |
+        cat > ai-test-executor.js << 'EOF'
+        const { chromium } = require('playwright');
+        const fs = require('fs');
+        
+        async function executeTestFromMarkdown() {
+          const testSuite = fs.readFileSync('Testsuite.md', 'utf8');
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage();
+          
+          // Parse test cases from markdown
+          const testCases = parseTestCases(testSuite);
+          const results = [];
+          
+          for (const testCase of testCases) {
+            console.log(`Executing: ${testCase.id} - ${testCase.description}`);
+            const result = await executeTestCase(page, testCase);
+            results.push(result);
+          }
+          
+          await browser.close();
+          generateReport(results);
+        }
+        
+        function parseTestCases(markdown) {
+          const testCases = [];
+          const lines = markdown.split('\n');
+          let currentTest = null;
+          
+          for (const line of lines) {
+            if (line.match(/^## TC \d+/)) {
+              if (currentTest) testCases.push(currentTest);
+              currentTest = {
+                id: line.match(/TC \d+/)[0],
+                description: line.replace(/^## TC \d+ - /, ''),
+                steps: []
+              };
+            } else if (line.startsWith('- ') && currentTest) {
+              currentTest.steps.push(line.substring(2));
+            }
+          }
+          if (currentTest) testCases.push(currentTest);
+          return testCases;
+        }
+        
+        async function executeTestCase(page, testCase) {
+          const result = {
+            id: testCase.id,
+            description: testCase.description,
+            status: 'PASS',
+            steps: [],
+            error: null,
+            timestamp: new Date().toISOString()
+          };
+          
+          try {
+            for (const step of testCase.steps) {
+              console.log(`  Step: ${step}`);
+              await executeStep(page, step);
+              result.steps.push({ step, status: 'PASS' });
+            }
+          } catch (error) {
+            result.status = 'FAIL';
+            result.error = error.message;
+            result.steps.push({ step: step, status: 'FAIL', error: error.message });
+          }
+          
+          return result;
+        }
+        
+        async function executeStep(page, step) {
+          if (step.includes('Navigate to')) {
+            const url = step.match(/`([^`]+)`/)?.[1];
+            if (url) await page.goto(url);
+          } else if (step.includes('Click on the Register link')) {
+            await page.click('a[href*="register"]');
+          } else if (step.includes('Fill the registration page')) {
+            // Generate unique username
+            const timestamp = Date.now();
+            const username = `user${timestamp}`.substring(0, 10);
+            
+            await page.fill('input[name="customer.firstName"]', 'Test');
+            await page.fill('input[name="customer.lastName"]', 'User');
+            await page.fill('input[name="customer.address.street"]', '123 Test St');
+            await page.fill('input[name="customer.address.city"]', 'Test City');
+            await page.fill('input[name="customer.address.state"]', 'TS');
+            await page.fill('input[name="customer.address.zipCode"]', '12345');
+            await page.fill('input[name="customer.phoneNumber"]', '555-1234');
+            await page.fill('input[name="customer.ssn"]', '123-45-6789');
+            await page.fill('input[name="customer.username"]', username);
+            await page.fill('input[name="customer.password"]', 'password123');
+            await page.fill('input[name="repeatedPassword"]', 'password123');
+          } else if (step.includes('submit the form')) {
+            await page.click('input[type="submit"][value="Register"]');
+          } else if (step.includes('Verify that welcome message')) {
+            await page.waitForSelector('h1.title');
+            const welcomeText = await page.textContent('h1.title');
+            if (!welcomeText.includes('Welcome')) {
+              throw new Error('Welcome message not found');
+            }
+          }
+          
+          // Wait a bit between steps
+          await page.waitForTimeout(1000);
+        }
+        
+        function generateReport(results) {
+          const html = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Test Execution Report</title>
+              <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+              <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .header { background: #f4f4f4; padding: 20px; border-radius: 5px; }
+                .test-case { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+                .pass { border-left: 5px solid #4CAF50; }
+                .fail { border-left: 5px solid #f44336; }
+                .chart-container { width: 400px; height: 400px; margin: 20px auto; }
+              </style>
+            </head>
+            <body>
+              <div class="header">
+                <h1>Test Execution Report</h1>
+                <p>Generated: ${new Date().toLocaleString()}</p>
+                <p>Total Tests: ${results.length}</p>
+                <p>Passed: ${results.filter(r => r.status === 'PASS').length}</p>
+                <p>Failed: ${results.filter(r => r.status === 'FAIL').length}</p>
+              </div>
+              
+              <div class="chart-container">
+                <canvas id="resultsChart"></canvas>
+              </div>
+              
+              ${results.map(result => `
+                <div class="test-case ${result.status.toLowerCase()}">
+                  <h3>${result.id} - ${result.description}</h3>
+                  <p><strong>Status:</strong> ${result.status}</p>
+                  <p><strong>Executed:</strong> ${result.timestamp}</p>
+                  ${result.error ? `<p><strong>Error:</strong> ${result.error}</p>` : ''}
+                  <details>
+                    <summary>Steps</summary>
+                    <ul>
+                      ${result.steps.map(step => `
+                        <li style="color: ${step.status === 'PASS' ? 'green' : 'red'}">
+                          ${step.step} - ${step.status}
+                          ${step.error ? `<br><em>${step.error}</em>` : ''}
+                        </li>
+                      `).join('')}
+                    </ul>
+                  </details>
+                </div>
+              `).join('')}
+              
+              <script>
+                const ctx = document.getElementById('resultsChart').getContext('2d');
+                new Chart(ctx, {
+                  type: 'bar',
+                  data: {
+                    labels: ['Passed', 'Failed'],
+                    datasets: [{
+                      label: 'Test Results',
+                      data: [${results.filter(r => r.status === 'PASS').length}, ${results.filter(r => r.status === 'FAIL').length}],
+                      backgroundColor: ['#4CAF50', '#f44336']
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    scales: {
+                      y: { beginAtZero: true }
+                    }
+                  }
+                });
+              </script>
+            </body>
+            </html>
+          `;
+          
+          fs.writeFileSync('test-report.html', html);
+          console.log('Test report generated: test-report.html');
+        }
+        
+        executeTestFromMarkdown().catch(console.error);
+        EOF
+        
+    - name: Execute AI Tests
+      run: node ai-test-executor.js
+      
+    - name: Upload Test Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-report
+        path: test-report.html
+        
+    - name: Upload Screenshots
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: screenshots
+        path: test-results/
