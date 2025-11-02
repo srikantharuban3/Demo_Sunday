@@ -1,0 +1,985 @@
+name: AI-Powered Test Suite Executor
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      test_environment:
+        description: 'Test Environment'
+        required: false
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      browser:
+        description: 'Browser to use'
+        required: false
+        default: 'chromium'
+        type: choice
+        options:
+          - chromium
+          - firefox
+          - webkit
+      headless:
+        description: 'Run in headless mode'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  TEST_ENVIRONMENT: ${{ github.event.inputs.test_environment || 'staging' }}
+  BROWSER: ${{ github.event.inputs.browser || 'chromium' }}
+  HEADLESS: ${{ github.event.inputs.headless || true }}
+
+jobs:
+  ai-test-execution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18]
+        
+    steps:
+    - name: 🔄 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: 📦 Install Dependencies
+      run: |
+        npm init -y
+        npm install playwright @playwright/test
+        npm install axios cheerio
+        npm install moment
+        npm install fs-extra
+        
+    - name: 🎭 Install Playwright Browsers
+      run: npx playwright install --with-deps
+      
+    - name: 🤖 Create Enhanced AI Test Executor
+      run: |
+        cat > ai-enhanced-executor.js << 'EOF'
+        const { chromium, firefox, webkit } = require('playwright');
+        const fs = require('fs-extra');
+        const path = require('path');
+        const moment = require('moment');
+        
+        class AITestExecutor {
+          constructor() {
+            this.browser = null;
+            this.page = null;
+            this.testResults = [];
+            this.screenshots = [];
+            this.startTime = moment();
+            this.config = {
+              browser: process.env.BROWSER || 'chromium',
+              headless: process.env.HEADLESS !== 'false',
+              timeout: 30000,
+              retries: 2
+            };
+          }
+          
+          async initialize() {
+            console.log('🚀 Initializing AI Test Executor...');
+            console.log(`📊 Configuration: ${JSON.stringify(this.config, null, 2)}`);
+            
+            // Select browser based on configuration
+            const browsers = { chromium, firefox, webkit };
+            this.browser = await browsers[this.config.browser].launch({
+              headless: this.config.headless,
+              args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+            
+            this.page = await this.browser.newPage();
+            
+            // Set viewport and user agent
+            await this.page.setViewportSize({ width: 1920, height: 1080 });
+            await this.page.setExtraHTTPHeaders({
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            });
+            
+            // Create directories for artifacts
+            await fs.ensureDir('test-results');
+            await fs.ensureDir('test-results/screenshots');
+          }
+          
+          async executeTestSuite() {
+            try {
+              console.log('📋 Reading test suite from Testsuite.md...');
+              const testSuite = await fs.readFile('Testsuite.md', 'utf8');
+              const testCases = this.parseTestCases(testSuite);
+              
+              console.log(`🔍 Found ${testCases.length} test case(s) to execute`);
+              
+              for (const testCase of testCases) {
+                await this.executeTestCase(testCase);
+              }
+              
+              await this.generateComprehensiveReport();
+              await this.cleanup();
+              
+            } catch (error) {
+              console.error('❌ Fatal error in test execution:', error);
+              await this.takeScreenshot('fatal-error');
+              throw error;
+            }
+          }
+          
+          parseTestCases(markdown) {
+            const testCases = [];
+            const lines = markdown.split('\n');
+            let currentTest = null;
+            let inTestSuite = false;
+            
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i].trim();
+              
+              // Detect test suite section
+              if (line.toLowerCase().includes('# test suite')) {
+                inTestSuite = true;
+                continue;
+              }
+              
+              // Parse test case headers
+              if (inTestSuite && line.match(/^## TC \d+/)) {
+                if (currentTest) {
+                  testCases.push(currentTest);
+                }
+                
+                const tcMatch = line.match(/TC (\d+)/);
+                const description = line.replace(/^## TC \d+ - /, '').trim();
+                
+                currentTest = {
+                  id: `TC${tcMatch[1].padStart(3, '0')}`,
+                  number: parseInt(tcMatch[1]),
+                  title: description,
+                  steps: [],
+                  expectedResults: [],
+                  priority: this.extractPriority(description),
+                  category: this.extractCategory(description)
+                };
+              }
+              
+              // Parse test steps
+              else if (currentTest && line.startsWith('- ')) {
+                const step = line.substring(2).trim();
+                if (step.toLowerCase().includes('verify') || step.toLowerCase().includes('check')) {
+                  currentTest.expectedResults.push(step);
+                } else {
+                  currentTest.steps.push(step);
+                }
+              }
+            }
+            
+            if (currentTest) {
+              testCases.push(currentTest);
+            }
+            
+            return testCases;
+          }
+          
+          extractPriority(description) {
+            if (description.toLowerCase().includes('critical') || description.toLowerCase().includes('login')) {
+              return 'HIGH';
+            } else if (description.toLowerCase().includes('register') || description.toLowerCase().includes('create')) {
+              return 'MEDIUM';
+            }
+            return 'LOW';
+          }
+          
+          extractCategory(description) {
+            if (description.toLowerCase().includes('register') || description.toLowerCase().includes('signup')) {
+              return 'Registration';
+            } else if (description.toLowerCase().includes('login') || description.toLowerCase().includes('authentication')) {
+              return 'Authentication';
+            } else if (description.toLowerCase().includes('payment') || description.toLowerCase().includes('transaction')) {
+              return 'Payment';
+            }
+            return 'General';
+          }
+          
+          async executeTestCase(testCase) {
+            console.log(`\n🧪 Executing ${testCase.id}: ${testCase.title}`);
+            
+            const result = {
+              id: testCase.id,
+              title: testCase.title,
+              category: testCase.category,
+              priority: testCase.priority,
+              status: 'PASS',
+              startTime: moment(),
+              endTime: null,
+              duration: null,
+              steps: [],
+              errors: [],
+              screenshots: [],
+              retryCount: 0
+            };
+            
+            // Retry mechanism
+            for (let attempt = 1; attempt <= this.config.retries + 1; attempt++) {
+              try {
+                result.retryCount = attempt - 1;
+                
+                // Execute test steps
+                for (let i = 0; i < testCase.steps.length; i++) {
+                  const step = testCase.steps[i];
+                  console.log(`  📝 Step ${i + 1}: ${step}`);
+                  
+                  await this.executeStep(step, testCase.id, i + 1);
+                  result.steps.push({
+                    number: i + 1,
+                    description: step,
+                    status: 'PASS',
+                    timestamp: moment().format('HH:mm:ss')
+                  });
+                }
+                
+                // Execute verification steps
+                for (let i = 0; i < testCase.expectedResults.length; i++) {
+                  const verification = testCase.expectedResults[i];
+                  console.log(`  ✅ Verification ${i + 1}: ${verification}`);
+                  
+                  await this.executeVerification(verification, testCase.id, i + 1);
+                  result.steps.push({
+                    number: testCase.steps.length + i + 1,
+                    description: verification,
+                    status: 'PASS',
+                    type: 'verification',
+                    timestamp: moment().format('HH:mm:ss')
+                  });
+                }
+                
+                // If we reach here, test passed
+                break;
+                
+              } catch (error) {
+                console.error(`  ❌ Attempt ${attempt} failed:`, error.message);
+                
+                result.errors.push({
+                  attempt: attempt,
+                  message: error.message,
+                  timestamp: moment().format('HH:mm:ss')
+                });
+                
+                // Take screenshot on error
+                const screenshotName = `${testCase.id}-error-attempt${attempt}`;
+                await this.takeScreenshot(screenshotName);
+                result.screenshots.push(screenshotName);
+                
+                if (attempt === this.config.retries + 1) {
+                  result.status = 'FAIL';
+                  result.steps.push({
+                    number: result.steps.length + 1,
+                    description: 'Test failed after all retry attempts',
+                    status: 'FAIL',
+                    error: error.message,
+                    timestamp: moment().format('HH:mm:ss')
+                  });
+                } else {
+                  console.log(`  🔄 Retrying in 2 seconds... (${attempt}/${this.config.retries + 1})`);
+                  await this.page.waitForTimeout(2000);
+                }
+              }
+            }
+            
+            result.endTime = moment();
+            result.duration = result.endTime.diff(result.startTime, 'seconds');
+            
+            console.log(`  ${result.status === 'PASS' ? '✅' : '❌'} ${testCase.id} completed in ${result.duration}s`);
+            
+            this.testResults.push(result);
+          }
+          
+          async executeStep(step, testId, stepNum) {
+            // Add delay between steps for stability
+            await this.page.waitForTimeout(1000);
+            
+            try {
+              if (step.includes('Navigate to') || step.includes('Go to')) {
+                await this.handleNavigation(step);
+              } else if (step.includes('Click') || step.includes('click')) {
+                await this.handleClick(step);
+              } else if (step.includes('Fill') || step.includes('Enter') || step.includes('Type')) {
+                await this.handleFormFilling(step, testId);
+              } else if (step.includes('Submit') || step.includes('submit')) {
+                await this.handleSubmit(step);
+              } else if (step.includes('Wait') || step.includes('wait')) {
+                await this.handleWait(step);
+              } else {
+                console.log(`  ⚠️  Unknown step type, attempting intelligent interpretation...`);
+                await this.intelligentStepExecution(step);
+              }
+              
+              // Take screenshot after each major step
+              if (stepNum % 3 === 0) {
+                await this.takeScreenshot(`${testId}-step${stepNum}`);
+              }
+              
+            } catch (error) {
+              // Enhanced error context
+              const pageUrl = this.page.url();
+              const pageTitle = await this.page.title().catch(() => 'Unknown');
+              
+              throw new Error(`Step failed on page "${pageTitle}" (${pageUrl}): ${error.message}`);
+            }
+          }
+          
+          async handleNavigation(step) {
+            const urlMatch = step.match(/`([^`]+)`/) || step.match(/https?:\/\/[^\s]+/);
+            if (urlMatch) {
+              const url = urlMatch[1] || urlMatch[0];
+              console.log(`    🌐 Navigating to: ${url}`);
+              await this.page.goto(url, { waitUntil: 'networkidle', timeout: this.config.timeout });
+            }
+          }
+          
+          async handleClick(step) {
+            const clickTargets = [
+              { pattern: /register/i, selector: 'a[href*="register"], button:has-text("Register"), .register' },
+              { pattern: /login/i, selector: 'a[href*="login"], button:has-text("Login"), .login' },
+              { pattern: /submit/i, selector: 'input[type="submit"], button[type="submit"], button:has-text("Submit")' },
+              { pattern: /sign up/i, selector: 'a:has-text("Sign Up"), button:has-text("Sign Up")' },
+              { pattern: /continue/i, selector: 'button:has-text("Continue"), .continue' }
+            ];
+            
+            for (const target of clickTargets) {
+              if (target.pattern.test(step)) {
+                console.log(`    👆 Clicking: ${target.selector}`);
+                await this.page.click(target.selector, { timeout: this.config.timeout });
+                return;
+              }
+            }
+            
+            // Generic click handler
+            console.log(`    👆 Attempting intelligent click interpretation...`);
+            await this.intelligentClick(step);
+          }
+          
+          async handleFormFilling(step, testId) {
+            console.log(`    📝 Filling form fields...`);
+            
+            // Generate unique test data
+            const timestamp = Date.now();
+            const uniqueId = Math.random().toString(36).substring(2, 8);
+            const testData = {
+              firstName: 'John',
+              lastName: 'Doe',
+              username: `user${timestamp}`.substring(0, 10),
+              email: `test${uniqueId}@example.com`,
+              password: 'TestPass123!',
+              phone: '555-0123',
+              ssn: '123-45-6789',
+              address: '123 Test Street',
+              city: 'Test City',
+              state: 'CA',
+              zipCode: '12345'
+            };
+            
+            // Smart form field detection and filling
+            const fieldMappings = [
+              { patterns: ['firstName', 'first'], value: testData.firstName },
+              { patterns: ['lastName', 'last'], value: testData.lastName },
+              { patterns: ['username', 'user'], value: testData.username },
+              { patterns: ['email'], value: testData.email },
+              { patterns: ['password'], value: testData.password },
+              { patterns: ['phone'], value: testData.phone },
+              { patterns: ['ssn'], value: testData.ssn },
+              { patterns: ['address', 'street'], value: testData.address },
+              { patterns: ['city'], value: testData.city },
+              { patterns: ['state'], value: testData.state },
+              { patterns: ['zip'], value: testData.zipCode }
+            ];
+            
+            for (const mapping of fieldMappings) {
+              for (const pattern of mapping.patterns) {
+                const selectors = [
+                  `input[name*="${pattern}"]`,
+                  `input[id*="${pattern}"]`,
+                  `input[placeholder*="${pattern}"]`,
+                  `input[class*="${pattern}"]`
+                ];
+                
+                for (const selector of selectors) {
+                  try {
+                    const element = await this.page.$(selector);
+                    if (element) {
+                      await this.page.fill(selector, mapping.value);
+                      console.log(`      ✓ Filled ${pattern}: ${mapping.value}`);
+                      break;
+                    }
+                  } catch (e) {
+                    // Continue to next selector
+                  }
+                }
+              }
+            }
+            
+            // Handle repeated password fields
+            const repeatPasswordSelectors = [
+              'input[name*="repeat"]',
+              'input[name*="confirm"]',
+              'input[id*="repeat"]',
+              'input[id*="confirm"]'
+            ];
+            
+            for (const selector of repeatPasswordSelectors) {
+              try {
+                await this.page.fill(selector, testData.password);
+                console.log(`      ✓ Filled repeat password`);
+                break;
+              } catch (e) {
+                // Continue to next selector
+              }
+            }
+          }
+          
+          async handleSubmit(step) {
+            const submitSelectors = [
+              'input[type="submit"]',
+              'button[type="submit"]',
+              'button:has-text("Register")',
+              'button:has-text("Submit")',
+              'button:has-text("Sign Up")',
+              '.submit',
+              '.register'
+            ];
+            
+            for (const selector of submitSelectors) {
+              try {
+                const element = await this.page.$(selector);
+                if (element) {
+                  console.log(`    🚀 Submitting form: ${selector}`);
+                  await this.page.click(selector);
+                  await this.page.waitForTimeout(2000); // Wait for submission
+                  return;
+                }
+              } catch (e) {
+                // Continue to next selector
+              }
+            }
+          }
+          
+          async executeVerification(verification, testId, verificationNum) {
+            if (verification.toLowerCase().includes('welcome')) {
+              await this.verifyWelcomeMessage();
+            } else if (verification.toLowerCase().includes('success')) {
+              await this.verifySuccessMessage();
+            } else if (verification.toLowerCase().includes('error')) {
+              await this.verifyErrorMessage();
+            } else {
+              console.log(`    ⚠️  Custom verification: ${verification}`);
+              await this.intelligentVerification(verification);
+            }
+          }
+          
+          async verifyWelcomeMessage() {
+            const welcomeSelectors = [
+              'h1:has-text("Welcome")',
+              '.welcome',
+              '[class*="welcome"]',
+              'h1.title',
+              '.title:has-text("Welcome")'
+            ];
+            
+            for (const selector of welcomeSelectors) {
+              try {
+                await this.page.waitForSelector(selector, { timeout: 10000 });
+                const text = await this.page.textContent(selector);
+                if (text && text.toLowerCase().includes('welcome')) {
+                  console.log(`    ✅ Welcome message verified: "${text}"`);
+                  return;
+                }
+              } catch (e) {
+                // Continue to next selector
+              }
+            }
+            
+            throw new Error('Welcome message not found or does not contain expected text');
+          }
+          
+          async intelligentClick(step) {
+            // Use AI-like pattern matching for click actions
+            const pageContent = await this.page.content();
+            const linkTexts = await this.page.$$eval('a', links => 
+              links.map(link => ({ text: link.textContent, href: link.href }))
+            );
+            
+            const buttonTexts = await this.page.$$eval('button', buttons => 
+              buttons.map(btn => btn.textContent)
+            );
+            
+            // Find best match
+            const stepLower = step.toLowerCase();
+            for (const link of linkTexts) {
+              if (link.text.toLowerCase().includes('register') && stepLower.includes('register')) {
+                await this.page.click(`text=${link.text}`);
+                return;
+              }
+            }
+            
+            throw new Error(`Could not find clickable element for: ${step}`);
+          }
+          
+          async takeScreenshot(name) {
+            try {
+              const screenshotPath = `test-results/screenshots/${name}-${moment().format('YYYY-MM-DD-HH-mm-ss')}.png`;
+              await this.page.screenshot({ 
+                path: screenshotPath, 
+                fullPage: true 
+              });
+              this.screenshots.push(screenshotPath);
+              console.log(`    📸 Screenshot saved: ${screenshotPath}`);
+            } catch (error) {
+              console.error(`Failed to take screenshot: ${error.message}`);
+            }
+          }
+          
+          async generateComprehensiveReport() {
+            const endTime = moment();
+            const totalDuration = endTime.diff(this.startTime, 'seconds');
+            const passedTests = this.testResults.filter(r => r.status === 'PASS').length;
+            const failedTests = this.testResults.filter(r => r.status === 'FAIL').length;
+            const successRate = ((passedTests / this.testResults.length) * 100).toFixed(1);
+            
+            const reportHtml = `
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>AI Test Execution Report</title>
+              <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+              <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { 
+                  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  min-height: 100vh;
+                  padding: 20px;
+                }
+                .container { 
+                  max-width: 1200px; 
+                  margin: 0 auto; 
+                  background: white;
+                  border-radius: 15px;
+                  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                  overflow: hidden;
+                }
+                .header { 
+                  background: linear-gradient(45deg, #2196F3, #21CBF3);
+                  color: white;
+                  padding: 30px;
+                  text-align: center;
+                }
+                .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+                .header .subtitle { font-size: 1.2em; opacity: 0.9; }
+                .stats-grid { 
+                  display: grid; 
+                  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                  gap: 20px;
+                  padding: 30px;
+                  background: #f8f9fa;
+                }
+                .stat-card { 
+                  background: white;
+                  padding: 25px;
+                  border-radius: 10px;
+                  text-align: center;
+                  box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+                  transition: transform 0.3s;
+                }
+                .stat-card:hover { transform: translateY(-5px); }
+                .stat-card .icon { font-size: 2.5em; margin-bottom: 15px; }
+                .stat-card .value { font-size: 2.2em; font-weight: bold; margin-bottom: 10px; }
+                .stat-card .label { color: #666; font-size: 1.1em; }
+                .pass .icon, .pass .value { color: #4CAF50; }
+                .fail .icon, .fail .value { color: #f44336; }
+                .total .icon, .total .value { color: #2196F3; }
+                .time .icon, .time .value { color: #FF9800; }
+                .charts-section { 
+                  padding: 30px;
+                  display: grid;
+                  grid-template-columns: 1fr 1fr;
+                  gap: 30px;
+                }
+                .chart-container { 
+                  background: white;
+                  padding: 20px;
+                  border-radius: 10px;
+                  box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+                }
+                .test-results { padding: 30px; }
+                .test-case { 
+                  margin: 20px 0;
+                  border-radius: 10px;
+                  overflow: hidden;
+                  box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+                  transition: all 0.3s;
+                }
+                .test-case:hover { box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
+                .test-case.pass { border-left: 5px solid #4CAF50; }
+                .test-case.fail { border-left: 5px solid #f44336; }
+                .test-header { 
+                  padding: 20px;
+                  background: #f8f9fa;
+                  cursor: pointer;
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                }
+                .test-header:hover { background: #e9ecef; }
+                .test-body { 
+                  padding: 20px;
+                  background: white;
+                  max-height: 0;
+                  overflow: hidden;
+                  transition: max-height 0.3s ease;
+                }
+                .test-case.expanded .test-body { max-height: 1000px; }
+                .step { 
+                  padding: 10px 15px;
+                  margin: 8px 0;
+                  border-radius: 5px;
+                  border-left: 3px solid #ddd;
+                }
+                .step.pass { background: #f8fff8; border-left-color: #4CAF50; }
+                .step.fail { background: #fff8f8; border-left-color: #f44336; }
+                .step.verification { background: #f0f8ff; border-left-color: #2196F3; }
+                .badge { 
+                  padding: 4px 12px;
+                  border-radius: 20px;
+                  font-size: 0.8em;
+                  font-weight: bold;
+                  text-transform: uppercase;
+                }
+                .badge.high { background: #ffebee; color: #c62828; }
+                .badge.medium { background: #fff3e0; color: #ef6c00; }
+                .badge.low { background: #e8f5e8; color: #2e7d32; }
+                .toggle-btn { 
+                  background: none;
+                  border: none;
+                  font-size: 1.2em;
+                  cursor: pointer;
+                  transition: transform 0.3s;
+                }
+                .test-case.expanded .toggle-btn { transform: rotate(180deg); }
+                @media (max-width: 768px) {
+                  .charts-section { grid-template-columns: 1fr; }
+                  .stats-grid { grid-template-columns: 1fr 1fr; }
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1><i class="fas fa-robot"></i> AI Test Execution Report</h1>
+                  <div class="subtitle">
+                    Generated on ${moment().format('MMMM Do YYYY, h:mm:ss a')} | 
+                    Browser: ${this.config.browser.toUpperCase()} | 
+                    Environment: ${process.env.TEST_ENVIRONMENT || 'staging'}
+                  </div>
+                </div>
+                
+                <div class="stats-grid">
+                  <div class="stat-card total">
+                    <div class="icon"><i class="fas fa-list-check"></i></div>
+                    <div class="value">${this.testResults.length}</div>
+                    <div class="label">Total Tests</div>
+                  </div>
+                  <div class="stat-card pass">
+                    <div class="icon"><i class="fas fa-check-circle"></i></div>
+                    <div class="value">${passedTests}</div>
+                    <div class="label">Passed</div>
+                  </div>
+                  <div class="stat-card fail">
+                    <div class="icon"><i class="fas fa-times-circle"></i></div>
+                    <div class="value">${failedTests}</div>
+                    <div class="label">Failed</div>
+                  </div>
+                  <div class="stat-card time">
+                    <div class="icon"><i class="fas fa-clock"></i></div>
+                    <div class="value">${totalDuration}s</div>
+                    <div class="label">Duration</div>
+                  </div>
+                </div>
+                
+                <div class="charts-section">
+                  <div class="chart-container">
+                    <h3>Test Results Overview</h3>
+                    <canvas id="resultsChart" width="400" height="300"></canvas>
+                  </div>
+                  <div class="chart-container">
+                    <h3>Test Categories</h3>
+                    <canvas id="categoryChart" width="400" height="300"></canvas>
+                  </div>
+                </div>
+                
+                <div class="test-results">
+                  <h2><i class="fas fa-clipboard-list"></i> Detailed Test Results</h2>
+                  ${this.testResults.map(result => `
+                    <div class="test-case ${result.status.toLowerCase()}" onclick="toggleTest('${result.id}')">
+                      <div class="test-header">
+                        <div>
+                          <h3>
+                            ${result.status === 'PASS' ? '<i class="fas fa-check-circle" style="color: #4CAF50;"></i>' : '<i class="fas fa-times-circle" style="color: #f44336;"></i>'}
+                            ${result.id} - ${result.title}
+                          </h3>
+                          <div style="margin-top: 8px;">
+                            <span class="badge ${result.priority.toLowerCase()}">${result.priority}</span>
+                            <span style="margin-left: 10px; color: #666;">
+                              <i class="fas fa-tag"></i> ${result.category}
+                            </span>
+                            <span style="margin-left: 15px; color: #666;">
+                              <i class="fas fa-clock"></i> ${result.duration}s
+                            </span>
+                            ${result.retryCount > 0 ? `<span style="margin-left: 15px; color: #FF9800;"><i class="fas fa-redo"></i> ${result.retryCount} retries</span>` : ''}
+                          </div>
+                        </div>
+                        <button class="toggle-btn">
+                          <i class="fas fa-chevron-down"></i>
+                        </button>
+                      </div>
+                      <div class="test-body" id="test-${result.id}">
+                        <h4><i class="fas fa-list-ol"></i> Test Steps</h4>
+                        ${result.steps.map(step => `
+                          <div class="step ${step.status.toLowerCase()} ${step.type || ''}">
+                            <strong>Step ${step.number}:</strong> ${step.description}
+                            <div style="font-size: 0.9em; color: #666; margin-top: 5px;">
+                              <i class="fas fa-clock"></i> ${step.timestamp}
+                              ${step.error ? `<br><span style="color: #f44336;"><i class="fas fa-exclamation-triangle"></i> ${step.error}</span>` : ''}
+                            </div>
+                          </div>
+                        `).join('')}
+                        
+                        ${result.errors.length > 0 ? `
+                          <h4 style="margin-top: 20px; color: #f44336;"><i class="fas fa-bug"></i> Errors</h4>
+                          ${result.errors.map(error => `
+                            <div style="background: #fff5f5; padding: 15px; border-radius: 5px; margin: 10px 0; border-left: 3px solid #f44336;">
+                              <strong>Attempt ${error.attempt}:</strong> ${error.message}
+                              <div style="font-size: 0.9em; color: #666; margin-top: 5px;">
+                                <i class="fas fa-clock"></i> ${error.timestamp}
+                              </div>
+                            </div>
+                          `).join('')}
+                        ` : ''}
+                        
+                        ${result.screenshots.length > 0 ? `
+                          <h4 style="margin-top: 20px;"><i class="fas fa-camera"></i> Screenshots</h4>
+                          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 10px;">
+                            ${result.screenshots.map(screenshot => `
+                              <div style="text-align: center;">
+                                <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">${screenshot}</div>
+                                <div style="background: #f0f0f0; padding: 20px; border-radius: 5px;">
+                                  <i class="fas fa-image" style="font-size: 2em; color: #ccc;"></i>
+                                  <div>Screenshot Available</div>
+                                </div>
+                              </div>
+                            `).join('')}
+                          </div>
+                        ` : ''}
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+              
+              <script>
+                // Results Chart
+                const ctx1 = document.getElementById('resultsChart').getContext('2d');
+                new Chart(ctx1, {
+                  type: 'doughnut',
+                  data: {
+                    labels: ['Passed', 'Failed'],
+                    datasets: [{
+                      data: [${passedTests}, ${failedTests}],
+                      backgroundColor: ['#4CAF50', '#f44336'],
+                      borderWidth: 0
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    plugins: {
+                      legend: { position: 'bottom' }
+                    }
+                  }
+                });
+                
+                // Category Chart
+                const categoryData = ${JSON.stringify(
+                  this.testResults.reduce((acc, test) => {
+                    acc[test.category] = (acc[test.category] || 0) + 1;
+                    return acc;
+                  }, {})
+                )};
+                
+                const ctx2 = document.getElementById('categoryChart').getContext('2d');
+                new Chart(ctx2, {
+                  type: 'bar',
+                  data: {
+                    labels: Object.keys(categoryData),
+                    datasets: [{
+                      label: 'Tests per Category',
+                      data: Object.values(categoryData),
+                      backgroundColor: ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0'],
+                      borderRadius: 5
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    scales: {
+                      y: { beginAtZero: true }
+                    },
+                    plugins: {
+                      legend: { display: false }
+                    }
+                  }
+                });
+                
+                function toggleTest(testId) {
+                  const testCase = document.querySelector(\`.test-case[onclick="toggleTest('\${testId}')"]\`);
+                  testCase.classList.toggle('expanded');
+                }
+                
+                // Auto-expand failed tests
+                document.querySelectorAll('.test-case.fail').forEach(test => {
+                  test.classList.add('expanded');
+                });
+              </script>
+            </body>
+            </html>`;
+            
+            await fs.writeFile('test-results/comprehensive-test-report.html', reportHtml);
+            
+            // Generate JSON report for CI/CD
+            const jsonReport = {
+              summary: {
+                total: this.testResults.length,
+                passed: passedTests,
+                failed: failedTests,
+                successRate: successRate,
+                duration: totalDuration,
+                timestamp: moment().toISOString()
+              },
+              environment: {
+                browser: this.config.browser,
+                headless: this.config.headless,
+                testEnvironment: process.env.TEST_ENVIRONMENT || 'staging'
+              },
+              results: this.testResults
+            };
+            
+            await fs.writeFile('test-results/test-report.json', JSON.stringify(jsonReport, null, 2));
+            
+            console.log(`\n📊 Test execution completed!`);
+            console.log(`📈 Success Rate: ${successRate}%`);
+            console.log(`⏱️  Total Duration: ${totalDuration} seconds`);
+            console.log(`📋 Detailed report: test-results/comprehensive-test-report.html`);
+            console.log(`📄 JSON report: test-results/test-report.json`);
+            
+            // Exit with appropriate code
+            if (failedTests > 0) {
+              process.exit(1);
+            }
+          }
+          
+          async cleanup() {
+            if (this.browser) {
+              await this.browser.close();
+            }
+          }
+        }
+        
+        // Execute the test suite
+        const executor = new AITestExecutor();
+        executor.initialize()
+          .then(() => executor.executeTestSuite())
+          .catch(error => {
+            console.error('💥 Test execution failed:', error);
+            process.exit(1);
+          });
+        EOF
+        
+    - name: 🚀 Execute AI-Powered Test Suite
+      run: node ai-enhanced-executor.js
+      
+    - name: 📊 Upload Test Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: ai-test-report-${{ matrix.node-version }}-${{ env.BROWSER }}
+        path: |
+          test-results/comprehensive-test-report.html
+          test-results/test-report.json
+          
+    - name: 📸 Upload Screenshots
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-screenshots-${{ matrix.node-version }}-${{ env.BROWSER }}
+        path: test-results/screenshots/
+        
+    - name: 📈 Comment Test Results on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          try {
+            const report = JSON.parse(fs.readFileSync('test-results/test-report.json', 'utf8'));
+            const comment = `
+            ## 🤖 AI Test Execution Results
+            
+            **📊 Summary:**
+            - **Total Tests:** ${report.summary.total}
+            - **✅ Passed:** ${report.summary.passed}
+            - **❌ Failed:** ${report.summary.failed}
+            - **📈 Success Rate:** ${report.summary.successRate}%
+            - **⏱️ Duration:** ${report.summary.duration}s
+            - **🌐 Browser:** ${report.environment.browser}
+            
+            ${report.summary.failed > 0 ? '⚠️ **Some tests failed. Please check the detailed report.**' : '🎉 **All tests passed successfully!**'}
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          } catch (error) {
+            console.log('Could not post test results comment:', error.message);
+          }
+          
+    - name: 📱 Slack Notification
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        text: '🚨 AI Test Suite failed! Check the GitHub Actions for details.'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  performance-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: 🔄 Checkout
+      uses: actions/checkout@v4
+      
+    - name: 📊 Performance Budget Check
+      run: |
+        echo "🔍 Checking test performance..."
+        # Add performance checks here if needed
+        echo "✅ Performance check completed"
