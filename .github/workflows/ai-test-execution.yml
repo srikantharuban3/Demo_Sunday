@@ -1,0 +1,503 @@
+name: AI-Powered Test Execution
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      browser:
+        description: 'Browser to use for testing'
+        required: false
+        default: 'chromium'
+        type: choice
+        options:
+          - chromium
+          - firefox
+          - webkit
+
+jobs:
+  ai-test-execution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: 🔄 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: 📦 Install Dependencies
+      run: |
+        npm init -y
+        npm install playwright @playwright/test
+        npm install moment fs-extra
+        
+    - name: 🎭 Install Playwright Browsers
+      run: npx playwright install --with-deps
+      
+    - name: 🤖 Create AI Test Executor
+      run: |
+        cat > ai-test-executor.js << 'EOF'
+        const { chromium, firefox, webkit } = require('playwright');
+        const fs = require('fs-extra');
+        const moment = require('moment');
+        
+        class AITestExecutor {
+          constructor() {
+            this.browser = null;
+            this.page = null;
+            this.testResults = [];
+            this.startTime = moment();
+            this.config = {
+              browser: process.env.BROWSER || 'chromium',
+              headless: true,
+              timeout: 30000
+            };
+          }
+          
+          async initialize() {
+            console.log('🚀 Initializing AI Test Executor...');
+            const browsers = { chromium, firefox, webkit };
+            this.browser = await browsers[this.config.browser].launch({
+              headless: this.config.headless
+            });
+            this.page = await this.browser.newPage();
+            await this.page.setViewportSize({ width: 1920, height: 1080 });
+            await fs.ensureDir('test-results');
+          }
+          
+          async executeTestSuite() {
+            try {
+              console.log('📋 Reading test suite from Testsuite.md...');
+              const testSuite = await fs.readFile('Testsuite.md', 'utf8');
+              const testCases = this.parseTestCases(testSuite);
+              
+              console.log(`🔍 Found ${testCases.length} test case(s)`);
+              
+              for (const testCase of testCases) {
+                await this.executeTestCase(testCase);
+              }
+              
+              await this.generateReport();
+              await this.cleanup();
+              
+            } catch (error) {
+              console.error('❌ Fatal error:', error);
+              throw error;
+            }
+          }
+          
+          parseTestCases(markdown) {
+            const testCases = [];
+            const lines = markdown.split('\n');
+            let currentTest = null;
+            let inTestSuite = false;
+            
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              
+              if (trimmedLine.toLowerCase().includes('# test suite')) {
+                inTestSuite = true;
+                continue;
+              }
+              
+              if (inTestSuite && trimmedLine.match(/^## TC \d+/)) {
+                if (currentTest) testCases.push(currentTest);
+                
+                const tcMatch = trimmedLine.match(/TC (\d+)/);
+                const description = trimmedLine.replace(/^## TC \d+ - /, '');
+                
+                currentTest = {
+                  id: `TC${tcMatch[1].padStart(3, '0')}`,
+                  title: description,
+                  steps: []
+                };
+              } else if (currentTest && trimmedLine.startsWith('- ')) {
+                currentTest.steps.push(trimmedLine.substring(2));
+              }
+            }
+            
+            if (currentTest) testCases.push(currentTest);
+            return testCases;
+          }
+          
+          async executeTestCase(testCase) {
+            console.log(`\n🧪 Executing ${testCase.id}: ${testCase.title}`);
+            
+            const result = {
+              id: testCase.id,
+              title: testCase.title,
+              status: 'PASS',
+              startTime: moment(),
+              steps: [],
+              error: null
+            };
+            
+            try {
+              for (let i = 0; i < testCase.steps.length; i++) {
+                const step = testCase.steps[i];
+                console.log(`  📝 Step ${i + 1}: ${step}`);
+                
+                await this.executeStep(step);
+                result.steps.push({
+                  number: i + 1,
+                  description: step,
+                  status: 'PASS'
+                });
+              }
+            } catch (error) {
+              console.error(`  ❌ Test failed: ${error.message}`);
+              result.status = 'FAIL';
+              result.error = error.message;
+              
+              await this.takeScreenshot(`${testCase.id}-error`);
+            }
+            
+            result.endTime = moment();
+            result.duration = result.endTime.diff(result.startTime, 'seconds');
+            this.testResults.push(result);
+          }
+          
+          async executeStep(step) {
+            await this.page.waitForTimeout(1000);
+            
+            if (step.toLowerCase().includes('navigate to')) {
+              await this.handleNavigation(step);
+            } else if (step.toLowerCase().includes('click')) {
+              await this.handleClick(step);
+            } else if (step.toLowerCase().includes('fill')) {
+              await this.handleFormFilling(step);
+            } else if (step.toLowerCase().includes('submit')) {
+              await this.handleSubmit(step);
+            } else if (step.toLowerCase().includes('verify')) {
+              await this.handleVerification(step);
+            }
+          }
+          
+          async handleNavigation(step) {
+            const urlMatch = step.match(/`([^`]+)`/);
+            if (urlMatch) {
+              const url = urlMatch[1];
+              console.log(`    🌐 Navigating to: ${url}`);
+              await this.page.goto(url, { waitUntil: 'networkidle' });
+            }
+          }
+          
+          async handleClick(step) {
+            if (step.toLowerCase().includes('register')) {
+              await this.page.click('a[href*="register"]');
+            } else if (step.toLowerCase().includes('login')) {
+              await this.page.click('a[href*="login"]');
+            }
+          }
+          
+          async handleFormFilling(step) {
+            console.log(`    📝 Filling registration form...`);
+            
+            const timestamp = Date.now();
+            const uniqueId = Math.random().toString(36).substring(2, 8);
+            
+            const testData = {
+              firstName: 'Test',
+              lastName: 'User',
+              username: `user${timestamp}`.substring(0, 10),
+              email: `test${uniqueId}@example.com`,
+              password: 'TestPass123!',
+              phone: '555-1234',
+              ssn: '123-45-6789',
+              address: '123 Test St',
+              city: 'Test City',
+              state: 'CA',
+              zipCode: '12345'
+            };
+            
+            const fieldMappings = [
+              { selectors: ['input[name*="firstName"]', 'input[id*="firstName"]'], value: testData.firstName },
+              { selectors: ['input[name*="lastName"]', 'input[id*="lastName"]'], value: testData.lastName },
+              { selectors: ['input[name*="username"]', 'input[id*="username"]'], value: testData.username },
+              { selectors: ['input[name*="email"]', 'input[id*="email"]'], value: testData.email },
+              { selectors: ['input[name*="password"]', 'input[id*="password"]'], value: testData.password },
+              { selectors: ['input[name*="phone"]', 'input[id*="phone"]'], value: testData.phone },
+              { selectors: ['input[name*="ssn"]', 'input[id*="ssn"]'], value: testData.ssn },
+              { selectors: ['input[name*="address"]', 'input[id*="address"]'], value: testData.address },
+              { selectors: ['input[name*="city"]', 'input[id*="city"]'], value: testData.city },
+              { selectors: ['input[name*="state"]', 'input[id*="state"]'], value: testData.state },
+              { selectors: ['input[name*="zip"]', 'input[id*="zip"]'], value: testData.zipCode }
+            ];
+            
+            for (const mapping of fieldMappings) {
+              for (const selector of mapping.selectors) {
+                try {
+                  await this.page.fill(selector, mapping.value);
+                  console.log(`      ✓ Filled field: ${selector}`);
+                  break;
+                } catch (e) {
+                  // Continue to next selector
+                }
+              }
+            }
+            
+            // Handle repeat password
+            try {
+              await this.page.fill('input[name*="repeat"]', testData.password);
+            } catch (e) {
+              try {
+                await this.page.fill('input[name*="confirm"]', testData.password);
+              } catch (e) {
+                // Ignore if no repeat password field
+              }
+            }
+          }
+          
+          async handleSubmit(step) {
+            const submitSelectors = [
+              'input[type="submit"]',
+              'button[type="submit"]',
+              'button:has-text("Register")',
+              'button:has-text("Submit")'
+            ];
+            
+            for (const selector of submitSelectors) {
+              try {
+                await this.page.click(selector);
+                console.log(`    🚀 Form submitted`);
+                await this.page.waitForTimeout(3000);
+                return;
+              } catch (e) {
+                // Continue to next selector
+              }
+            }
+          }
+          
+          async handleVerification(step) {
+            if (step.toLowerCase().includes('welcome')) {
+              const welcomeSelectors = [
+                'h1:has-text("Welcome")',
+                '.welcome',
+                'h1.title',
+                '[class*="welcome"]'
+              ];
+              
+              for (const selector of welcomeSelectors) {
+                try {
+                  await this.page.waitForSelector(selector, { timeout: 10000 });
+                  const text = await this.page.textContent(selector);
+                  if (text && text.toLowerCase().includes('welcome')) {
+                    console.log(`    ✅ Welcome message verified: "${text}"`);
+                    return;
+                  }
+                } catch (e) {
+                  // Continue to next selector
+                }
+              }
+              
+              throw new Error('Welcome message not found');
+            }
+          }
+          
+          async takeScreenshot(name) {
+            try {
+              const screenshotPath = `test-results/${name}.png`;
+              await this.page.screenshot({ path: screenshotPath, fullPage: true });
+              console.log(`    📸 Screenshot saved: ${screenshotPath}`);
+            } catch (error) {
+              console.error(`Failed to take screenshot: ${error.message}`);
+            }
+          }
+          
+          async generateReport() {
+            const endTime = moment();
+            const totalDuration = endTime.diff(this.startTime, 'seconds');
+            const passedTests = this.testResults.filter(r => r.status === 'PASS').length;
+            const failedTests = this.testResults.filter(r => r.status === 'FAIL').length;
+            
+            const reportHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>AI Test Execution Report</title>
+              <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+              <style>
+                body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+                .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; margin: -20px -20px 30px -20px; border-radius: 10px 10px 0 0; text-align: center; }
+                .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }
+                .stat-card { background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; border-left: 4px solid #007bff; }
+                .stat-card.pass { border-left-color: #28a745; }
+                .stat-card.fail { border-left-color: #dc3545; }
+                .stat-value { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
+                .stat-label { color: #666; }
+                .chart-container { width: 400px; height: 400px; margin: 30px auto; }
+                .test-results { margin-top: 30px; }
+                .test-case { margin: 15px 0; padding: 20px; border-radius: 8px; border-left: 4px solid #ddd; }
+                .test-case.pass { background: #f8fff8; border-left-color: #28a745; }
+                .test-case.fail { background: #fff8f8; border-left-color: #dc3545; }
+                .test-title { font-size: 1.2em; font-weight: bold; margin-bottom: 10px; }
+                .test-meta { color: #666; font-size: 0.9em; margin-bottom: 15px; }
+                .steps { margin-top: 15px; }
+                .step { padding: 8px 15px; margin: 5px 0; background: #f8f9fa; border-radius: 5px; }
+                .step.fail { background: #ffebee; }
+                .error { background: #ffebee; padding: 15px; border-radius: 5px; margin-top: 10px; color: #c62828; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>🤖 AI Test Execution Report</h1>
+                  <p>Generated on ${moment().format('MMMM Do YYYY, h:mm:ss a')}</p>
+                  <p>Browser: ${this.config.browser.toUpperCase()} | Duration: ${totalDuration}s</p>
+                </div>
+                
+                <div class="stats">
+                  <div class="stat-card">
+                    <div class="stat-value">${this.testResults.length}</div>
+                    <div class="stat-label">Total Tests</div>
+                  </div>
+                  <div class="stat-card pass">
+                    <div class="stat-value">${passedTests}</div>
+                    <div class="stat-label">Passed</div>
+                  </div>
+                  <div class="stat-card fail">
+                    <div class="stat-value">${failedTests}</div>
+                    <div class="stat-label">Failed</div>
+                  </div>
+                  <div class="stat-card">
+                    <div class="stat-value">${((passedTests / this.testResults.length) * 100).toFixed(1)}%</div>
+                    <div class="stat-label">Success Rate</div>
+                  </div>
+                </div>
+                
+                <div class="chart-container">
+                  <canvas id="resultsChart"></canvas>
+                </div>
+                
+                <div class="test-results">
+                  <h2>📋 Test Results</h2>
+                  ${this.testResults.map(result => `
+                    <div class="test-case ${result.status.toLowerCase()}">
+                      <div class="test-title">
+                        ${result.status === 'PASS' ? '✅' : '❌'} ${result.id} - ${result.title}
+                      </div>
+                      <div class="test-meta">
+                        Status: ${result.status} | Duration: ${result.duration}s | 
+                        Executed: ${result.startTime.format('HH:mm:ss')}
+                      </div>
+                      
+                      <div class="steps">
+                        <strong>Steps:</strong>
+                        ${result.steps.map(step => `
+                          <div class="step ${step.status.toLowerCase()}">
+                            ${step.number}. ${step.description}
+                          </div>
+                        `).join('')}
+                      </div>
+                      
+                      ${result.error ? `
+                        <div class="error">
+                          <strong>Error:</strong> ${result.error}
+                        </div>
+                      ` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+              
+              <script>
+                const ctx = document.getElementById('resultsChart').getContext('2d');
+                new Chart(ctx, {
+                  type: 'doughnut',
+                  data: {
+                    labels: ['Passed', 'Failed'],
+                    datasets: [{
+                      data: [${passedTests}, ${failedTests}],
+                      backgroundColor: ['#28a745', '#dc3545'],
+                      borderWidth: 0
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    plugins: {
+                      legend: { position: 'bottom' },
+                      title: { display: true, text: 'Test Results Overview' }
+                    }
+                  }
+                });
+              </script>
+            </body>
+            </html>`;
+            
+            await fs.writeFile('test-results/test-report.html', reportHtml);
+            
+            console.log(`\n📊 Test execution completed!`);
+            console.log(`📈 Success Rate: ${((passedTests / this.testResults.length) * 100).toFixed(1)}%`);
+            console.log(`⏱️  Total Duration: ${totalDuration} seconds`);
+            console.log(`📋 Report: test-results/test-report.html`);
+            
+            if (failedTests > 0) {
+              process.exit(1);
+            }
+          }
+          
+          async cleanup() {
+            if (this.browser) {
+              await this.browser.close();
+            }
+          }
+        }
+        
+        // Execute the test suite
+        const executor = new AITestExecutor();
+        executor.initialize()
+          .then(() => executor.executeTestSuite())
+          .catch(error => {
+            console.error('💥 Test execution failed:', error);
+            process.exit(1);
+          });
+        EOF
+        
+    - name: 🚀 Execute AI Tests
+      env:
+        BROWSER: ${{ github.event.inputs.browser || 'chromium' }}
+      run: node ai-test-executor.js
+      
+    - name: 📊 Upload Test Report
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: ai-test-report
+        path: test-results/
+        
+    - name: 💬 Comment Test Results on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          try {
+            const reportPath = 'test-results/test-report.html';
+            if (fs.existsSync(reportPath)) {
+              const comment = `
+              ## 🤖 AI Test Execution Results
+              
+              The AI-powered test suite has completed execution.
+              
+              📊 **Check the test report in the artifacts section for detailed results.**
+              
+              🔗 **Workflow Run:** ${context.payload.pull_request.head.sha}
+              `;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+          } catch (error) {
+            console.log('Could not post test results comment:', error.message);
+          }
