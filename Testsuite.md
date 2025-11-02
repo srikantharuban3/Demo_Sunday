@@ -26,3 +26,10 @@
 - user name should be 10 charactors and should be unique.
 - submit the form by clicking on the register page. 
 - Verify that welcome message with the new username is displayed.
+
+## TC 002 - Verify member registration process
+
+- Navigate to `https://parabank.parasoft.com/parabank`
+- Click on the register link
+- Fill the form and register the member
+- Verify that new member has been successfully registered
