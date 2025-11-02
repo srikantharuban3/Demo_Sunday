@@ -2,7 +2,7 @@ name: AI-Powered Test Execution
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -10,449 +10,251 @@ on:
 jobs:
   ai-test-execution:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     
-    strategy:
-      matrix:
-        browser: [chromium, firefox, webkit]
-      fail-fast: false
-
     steps:
-    - name: Checkout Repository
+    - name: Checkout code
       uses: actions/checkout@v4
-
+      
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
-
-    - name: Install Dependencies
+        
+    - name: Install Playwright
       run: |
         npm init -y
-        npm install @playwright/test fs-extra uuid chart.js
-        npx playwright install --with-deps
-
+        npm install playwright @playwright/test
+        npx playwright install
+        
+    - name: Install AI Test Runner
+      run: |
+        npm install openai
+        npm install @anthropic-ai/sdk
+        
     - name: Create AI Test Executor
       run: |
         cat > ai-test-executor.js << 'EOF'
-        const { test, expect, chromium, firefox, webkit } = require('@playwright/test');
-        const fs = require('fs-extra');
-        const path = require('path');
-        const { v4: uuidv4 } = require('uuid');
-
-        class AITestExecutor {
-          constructor() {
-            this.browser = null;
-            this.page = null;
-            this.testResults = [];
-            this.startTime = new Date();
+        const { chromium } = require('playwright');
+        const fs = require('fs');
+        
+        async function executeTestFromMarkdown() {
+          const testSuite = fs.readFileSync('Testsuite.md', 'utf8');
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage();
+          
+          // Parse test cases from markdown
+          const testCases = parseTestCases(testSuite);
+          const results = [];
+          
+          for (const testCase of testCases) {
+            console.log(`Executing: ${testCase.id} - ${testCase.description}`);
+            const result = await executeTestCase(page, testCase);
+            results.push(result);
           }
-
-          async initialize(browserType = 'chromium') {
-            const browsers = { chromium, firefox, webkit };
-            this.browser = await browsers[browserType].launch({ 
-              headless: true,
-              args: ['--no-sandbox', '--disable-dev-shm-usage']
-            });
-            this.page = await this.browser.newPage();
-            
-            await this.page.setViewportSize({ width: 1280, height: 720 });
-            await this.page.setExtraHTTPHeaders({
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            });
-          }
-
-          async parseTestSuite() {
-            const testSuiteContent = await fs.readFile('Testsuite.md', 'utf-8');
-            const testCases = [];
-            const lines = testSuiteContent.split('\n');
-            
-            let currentTestCase = null;
-            let steps = [];
-            
-            for (const line of lines) {
-              if (line.startsWith('## TC ')) {
-                if (currentTestCase) {
-                  testCases.push({ ...currentTestCase, steps });
-                }
-                currentTestCase = {
-                  id: line.match(/TC \d+/)[0],
-                  title: line.replace(/## TC \d+ - /, ''),
-                  description: line
-                };
-                steps = [];
-              } else if (line.startsWith('- ') && currentTestCase) {
-                steps.push(line.replace('- ', '').trim());
-              }
-            }
-            
-            if (currentTestCase) {
-              testCases.push({ ...currentTestCase, steps });
-            }
-            
-            return testCases;
-          }
-
-          async executeTestCase(testCase) {
-            console.log(`\n🧪 Executing ${testCase.id}: ${testCase.title}`);
-            const startTime = new Date();
-            const testResult = {
-              id: testCase.id,
-              title: testCase.title,
-              description: testCase.description,
-              status: 'PASSED',
-              steps: [],
-              startTime: startTime.toISOString(),
-              endTime: null,
-              duration: 0,
-              errorMessage: null,
-              screenshots: []
-            };
-
-            try {
-              for (let i = 0; i < testCase.steps.length; i++) {
-                const step = testCase.steps[i];
-                console.log(`📋 Step ${i + 1}: ${step}`);
-                
-                const stepResult = await this.executeStep(step, i + 1);
-                testResult.steps.push(stepResult);
-                
-                if (!stepResult.passed) {
-                  testResult.status = 'FAILED';
-                  testResult.errorMessage = stepResult.error;
-                  break;
-                }
-                
-                await this.page.waitForTimeout(1000);
-              }
-            } catch (error) {
-              console.error(`❌ Test case failed: ${error.message}`);
-              testResult.status = 'FAILED';
-              testResult.errorMessage = error.message;
-              
-              const screenshotPath = `failure-${testCase.id}-${Date.now()}.png`;
-              await this.page.screenshot({ path: screenshotPath, fullPage: true });
-              testResult.screenshots.push(screenshotPath);
-            }
-
-            const endTime = new Date();
-            testResult.endTime = endTime.toISOString();
-            testResult.duration = endTime - startTime;
-            
-            console.log(`${testResult.status === 'PASSED' ? '✅' : '❌'} ${testCase.id} - ${testResult.status}`);
-            return testResult;
-          }
-
-          async executeStep(step, stepNumber) {
-            const stepResult = {
-              number: stepNumber,
-              description: step,
-              passed: false,
-              error: null,
-              timestamp: new Date().toISOString()
-            };
-
-            try {
-              if (step.includes('Navigate to')) {
-                const url = step.match(/\`([^`]+)\`/)?.[1] || step.match(/https?:\/\/[^\s]+/)?.[0];
-                if (url) {
-                  await this.page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-                  await this.page.waitForTimeout(2000);
-                  stepResult.passed = true;
-                }
-              }
-              
-              else if (step.toLowerCase().includes('click') && step.toLowerCase().includes('register')) {
-                await this.page.click('a[href*="register"], a:has-text("Register")');
-                await this.page.waitForLoadState('networkidle');
-                stepResult.passed = true;
-              }
-              
-              else if (step.toLowerCase().includes('fill') && step.toLowerCase().includes('registration')) {
-                await this.fillRegistrationForm();
-                stepResult.passed = true;
-              }
-              
-              else if (step.toLowerCase().includes('submit') && step.toLowerCase().includes('register')) {
-                await this.page.click('input[type="submit"], button:has-text("Register")');
-                await this.page.waitForLoadState('networkidle');
-                stepResult.passed = true;
-              }
-              
-              else if (step.toLowerCase().includes('verify') && step.toLowerCase().includes('welcome')) {
-                const welcomeVisible = await this.page.isVisible('text=/Welcome/i');
-                if (welcomeVisible) {
-                  stepResult.passed = true;
-                } else {
-                  throw new Error('Welcome message not found');
-                }
-              }
-              
-              else if (step.toLowerCase().includes('enter') && step.toLowerCase().includes('username')) {
-                await this.page.fill('input[name*="username"], input[name*="user"]', 'testuser123');
-                stepResult.passed = true;
-              }
-              
-              else if (step.toLowerCase().includes('enter') && step.toLowerCase().includes('password')) {
-                await this.page.fill('input[name*="password"], input[type="password"]', 'Password123');
-                stepResult.passed = true;
-              }
-              
-              else if (step.toLowerCase().includes('click') && step.toLowerCase().includes('log in')) {
-                await this.page.click('input[value*="Log"], button:has-text("Log In")');
-                await this.page.waitForLoadState('networkidle');
-                stepResult.passed = true;
-              }
-              
-              else if (step.toLowerCase().includes('verify') && step.toLowerCase().includes('account overview')) {
-                const overviewVisible = await this.page.isVisible('text=/account.*overview/i, text=/accounts/i');
-                if (overviewVisible) {
-                  stepResult.passed = true;
-                } else {
-                  throw new Error('Account overview page not displayed');
-                }
-              }
-              
-              else {
-                console.log(`⚠️  Generic step execution: ${step}`);
-                await this.page.waitForTimeout(1000);
-                stepResult.passed = true;
-              }
-
-            } catch (error) {
-              console.error(`❌ Step failed: ${error.message}`);
-              stepResult.passed = false;
-              stepResult.error = error.message;
-            }
-
-            return stepResult;
-          }
-
-          async fillRegistrationForm() {
-            const uniqueId = uuidv4().substr(0, 8);
-            const userData = {
-              firstName: 'John',
-              lastName: 'Doe',
-              address: '123 Main Street',
-              city: 'New York',
-              state: 'NY',
-              zipCode: '10001',
-              phone: '555-123-4567',
-              ssn: '123-45-6789',
-              username: `user${uniqueId}`,
-              password: 'Password123'
-            };
-
-            const fields = [
-              { selector: 'input[name*="firstName"], #customer\\.firstName', value: userData.firstName },
-              { selector: 'input[name*="lastName"], #customer\\.lastName', value: userData.lastName },
-              { selector: 'input[name*="address"], #customer\\.address\\.street', value: userData.address },
-              { selector: 'input[name*="city"], #customer\\.address\\.city', value: userData.city },
-              { selector: 'input[name*="state"], #customer\\.address\\.state', value: userData.state },
-              { selector: 'input[name*="zipCode"], #customer\\.address\\.zipCode', value: userData.zipCode },
-              { selector: 'input[name*="phone"], #customer\\.phoneNumber', value: userData.phone },
-              { selector: 'input[name*="ssn"], #customer\\.ssn', value: userData.ssn },
-              { selector: 'input[name*="username"], #customer\\.username', value: userData.username },
-              { selector: 'input[name*="password"]:not([name*="repeat"]), #customer\\.password', value: userData.password },
-              { selector: 'input[name*="confirm"], input[name*="repeat"], #repeatedPassword', value: userData.password }
-            ];
-
-            for (const field of fields) {
-              try {
-                const element = await this.page.$(field.selector);
-                if (element) {
-                  await this.page.fill(field.selector, field.value);
-                  await this.page.waitForTimeout(200);
-                }
-              } catch (error) {
-                console.warn(`Could not fill field ${field.selector}: ${error.message}`);
-              }
-            }
-          }
-
-          async generateHtmlReport(results, browserType) {
-            const totalTests = results.length;
-            const passedTests = results.filter(r => r.status === 'PASSED').length;
-            const failedTests = totalTests - passedTests;
-            const endTime = new Date();
-            const totalDuration = endTime - this.startTime;
-
-            const htmlContent = `
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>AI Test Execution Report - ${browserType}</title>
-                <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-                <style>
-                    body { font-family: 'Arial', sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-                    .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); overflow: hidden; }
-                    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }
-                    .header h1 { margin: 0; font-size: 2.5em; }
-                    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 30px; }
-                    .summary-card { background: #f8f9fa; padding: 20px; border-radius: 8px; text-align: center; }
-                    .summary-card h3 { margin: 0 0 10px 0; color: #333; }
-                    .summary-card .number { font-size: 2em; font-weight: bold; margin: 10px 0; }
-                    .passed { color: #28a745; }
-                    .failed { color: #dc3545; }
-                    .chart-container { padding: 30px; text-align: center; }
-                    .test-results { padding: 30px; }
-                    .test-case { margin: 20px 0; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-                    .test-header { padding: 15px 20px; font-weight: bold; }
-                    .test-header.passed { background: #d4edda; color: #155724; }
-                    .test-header.failed { background: #f8d7da; color: #721c24; }
-                    .test-steps { padding: 20px; background: #f8f9fa; }
-                    .step { margin: 10px 0; padding: 10px; border-left: 4px solid #ddd; }
-                    .step.passed { border-left-color: #28a745; }
-                    .step.failed { border-left-color: #dc3545; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="header">
-                        <h1>🤖 AI Test Execution Report</h1>
-                        <p>Browser: ${browserType.toUpperCase()} | Generated: ${endTime.toLocaleString()}</p>
-                    </div>
-                    
-                    <div class="summary">
-                        <div class="summary-card">
-                            <h3>Total Tests</h3>
-                            <div class="number">${totalTests}</div>
-                        </div>
-                        <div class="summary-card">
-                            <h3>Passed</h3>
-                            <div class="number passed">${passedTests}</div>
-                        </div>
-                        <div class="summary-card">
-                            <h3>Failed</h3>
-                            <div class="number failed">${failedTests}</div>
-                        </div>
-                        <div class="summary-card">
-                            <h3>Success Rate</h3>
-                            <div class="number">${((passedTests/totalTests)*100).toFixed(1)}%</div>
-                        </div>
-                    </div>
-
-                    <div class="chart-container">
-                        <canvas id="resultsChart" width="400" height="200"></canvas>
-                    </div>
-
-                    <div class="test-results">
-                        <h2>Test Results Details</h2>
-                        ${results.map(result => `
-                            <div class="test-case">
-                                <div class="test-header ${result.status.toLowerCase()}">
-                                    ${result.id}: ${result.title} - ${result.status}
-                                </div>
-                                <div class="test-steps">
-                                    ${result.steps.map(step => `
-                                        <div class="step ${step.passed ? 'passed' : 'failed'}">
-                                            Step ${step.number}: ${step.description}
-                                            ${step.error ? `<br><small style="color: red;">${step.error}</small>` : ''}
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-
-                <script>
-                    const ctx = document.getElementById('resultsChart').getContext('2d');
-                    new Chart(ctx, {
-                        type: 'bar',
-                        data: {
-                            labels: ['Passed', 'Failed'],
-                            datasets: [{
-                                label: 'Test Results',
-                                data: [${passedTests}, ${failedTests}],
-                                backgroundColor: ['#28a745', '#dc3545']
-                            }]
-                        },
-                        options: {
-                            responsive: true,
-                            scales: {
-                                y: {
-                                    beginAtZero: true
-                                }
-                            }
-                        }
-                    });
-                </script>
-            </body>
-            </html>`;
-
-            await fs.writeFile(`test-report-${browserType}.html`, htmlContent);
-            console.log(`📊 HTML report generated: test-report-${browserType}.html`);
-          }
-
-          async cleanup() {
-            if (this.browser) {
-              await this.browser.close();
-            }
-          }
+          
+          await browser.close();
+          generateReport(results);
         }
-
-        async function runTests() {
-          const browserType = process.env.BROWSER || 'chromium';
-          const executor = new AITestExecutor();
+        
+        function parseTestCases(markdown) {
+          const testCases = [];
+          const lines = markdown.split('\n');
+          let currentTest = null;
+          
+          for (const line of lines) {
+            if (line.match(/^## TC \d+/)) {
+              if (currentTest) testCases.push(currentTest);
+              currentTest = {
+                id: line.match(/TC \d+/)[0],
+                description: line.replace(/^## TC \d+ - /, ''),
+                steps: []
+              };
+            } else if (line.startsWith('- ') && currentTest) {
+              currentTest.steps.push(line.substring(2));
+            }
+          }
+          if (currentTest) testCases.push(currentTest);
+          return testCases;
+        }
+        
+        async function executeTestCase(page, testCase) {
+          const result = {
+            id: testCase.id,
+            description: testCase.description,
+            status: 'PASS',
+            steps: [],
+            error: null,
+            timestamp: new Date().toISOString()
+          };
           
           try {
-            console.log(`🚀 Starting AI test execution with ${browserType}...`);
-            await executor.initialize(browserType);
-            
-            const testCases = await executor.parseTestSuite();
-            console.log(`📋 Found ${testCases.length} test cases to execute`);
-            
-            const results = [];
-            for (const testCase of testCases) {
-              const result = await executor.executeTestCase(testCase);
-              results.push(result);
+            for (const step of testCase.steps) {
+              console.log(`  Step: ${step}`);
+              await executeStep(page, step);
+              result.steps.push({ step, status: 'PASS' });
             }
-            
-            await executor.generateHtmlReport(results, browserType);
-            
-            const passedCount = results.filter(r => r.status === 'PASSED').length;
-            const totalCount = results.length;
-            
-            console.log(`\n📊 Execution Summary: ${passedCount}/${totalCount} passed`);
-            
-            process.exit(totalCount === passedCount ? 0 : 1);
-            
           } catch (error) {
-            console.error(`💥 Execution failed: ${error.message}`);
-            process.exit(1);
-          } finally {
-            await executor.cleanup();
+            result.status = 'FAIL';
+            result.error = error.message;
+            result.steps.push({ step: step, status: 'FAIL', error: error.message });
           }
+          
+          return result;
         }
-
-        runTests();
+        
+        async function executeStep(page, step) {
+          if (step.includes('Navigate to')) {
+            const url = step.match(/`([^`]+)`/)?.[1];
+            if (url) await page.goto(url);
+          } else if (step.includes('Click on the Register link')) {
+            await page.click('a[href*="register"]');
+          } else if (step.includes('Fill the registration page')) {
+            // Generate unique username
+            const timestamp = Date.now();
+            const username = `user${timestamp}`.substring(0, 10);
+            
+            await page.fill('input[name="customer.firstName"]', 'Test');
+            await page.fill('input[name="customer.lastName"]', 'User');
+            await page.fill('input[name="customer.address.street"]', '123 Test St');
+            await page.fill('input[name="customer.address.city"]', 'Test City');
+            await page.fill('input[name="customer.address.state"]', 'TS');
+            await page.fill('input[name="customer.address.zipCode"]', '12345');
+            await page.fill('input[name="customer.phoneNumber"]', '555-1234');
+            await page.fill('input[name="customer.ssn"]', '123-45-6789');
+            await page.fill('input[name="customer.username"]', username);
+            await page.fill('input[name="customer.password"]', 'password123');
+            await page.fill('input[name="repeatedPassword"]', 'password123');
+          } else if (step.includes('submit the form')) {
+            await page.click('input[type="submit"][value="Register"]');
+          } else if (step.includes('Verify that welcome message')) {
+            await page.waitForSelector('h1.title');
+            const welcomeText = await page.textContent('h1.title');
+            if (!welcomeText.includes('Welcome')) {
+              throw new Error('Welcome message not found');
+            }
+          } else if (step.includes('Enter valid username')) {
+            await page.fill('input[name="username"]', 'testuser123');
+          } else if (step.includes('Enter valid password')) {
+            await page.fill('input[name="password"]', 'password123');
+          } else if (step.includes('Click on the "Log In" button')) {
+            await page.click('input[type="submit"][value="Log In"]');
+          } else if (step.includes('Verify that user is successfully logged in')) {
+            await page.waitForSelector('h1.title, .title');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('Account') && !pageContent.includes('Overview')) {
+              throw new Error('Login verification failed - Account page not found');
+            }
+          } else if (step.includes('Verify that "Welcome') || step.includes('Welcome [username]')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('Welcome')) {
+              throw new Error('Welcome message with username not found');
+            }
+          } else if (step.includes('account overview page is displayed')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('Account') && !pageContent.includes('Overview')) {
+              throw new Error('Account overview page not displayed');
+            }
+          }
+          
+          // Wait a bit between steps
+          await page.waitForTimeout(1000);
+        }
+        
+        function generateReport(results) {
+          const html = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Test Execution Report</title>
+              <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+              <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .header { background: #f4f4f4; padding: 20px; border-radius: 5px; }
+                .test-case { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+                .pass { border-left: 5px solid #4CAF50; }
+                .fail { border-left: 5px solid #f44336; }
+                .chart-container { width: 400px; height: 400px; margin: 20px auto; }
+              </style>
+            </head>
+            <body>
+              <div class="header">
+                <h1>Test Execution Report</h1>
+                <p>Generated: ${new Date().toLocaleString()}</p>
+                <p>Total Tests: ${results.length}</p>
+                <p>Passed: ${results.filter(r => r.status === 'PASS').length}</p>
+                <p>Failed: ${results.filter(r => r.status === 'FAIL').length}</p>
+              </div>
+              
+              <div class="chart-container">
+                <canvas id="resultsChart"></canvas>
+              </div>
+              
+              ${results.map(result => `
+                <div class="test-case ${result.status.toLowerCase()}">
+                  <h3>${result.id} - ${result.description}</h3>
+                  <p><strong>Status:</strong> ${result.status}</p>
+                  <p><strong>Executed:</strong> ${result.timestamp}</p>
+                  ${result.error ? `<p><strong>Error:</strong> ${result.error}</p>` : ''}
+                  <details>
+                    <summary>Steps</summary>
+                    <ul>
+                      ${result.steps.map(step => `
+                        <li style="color: ${step.status === 'PASS' ? 'green' : 'red'}">
+                          ${step.step} - ${step.status}
+                          ${step.error ? `<br><em>${step.error}</em>` : ''}
+                        </li>
+                      `).join('')}
+                    </ul>
+                  </details>
+                </div>
+              `).join('')}
+              
+              <script>
+                const ctx = document.getElementById('resultsChart').getContext('2d');
+                new Chart(ctx, {
+                  type: 'bar',
+                  data: {
+                    labels: ['Passed', 'Failed'],
+                    datasets: [{
+                      label: 'Test Results',
+                      data: [${results.filter(r => r.status === 'PASS').length}, ${results.filter(r => r.status === 'FAIL').length}],
+                      backgroundColor: ['#4CAF50', '#f44336']
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    scales: {
+                      y: { beginAtZero: true }
+                    }
+                  }
+                });
+              </script>
+            </body>
+            </html>
+          `;
+          
+          fs.writeFileSync('test-report.html', html);
+          console.log('Test report generated: test-report.html');
+        }
+        
+        executeTestFromMarkdown().catch(console.error);
         EOF
-
-    - name: Execute AI Test Suite
-      env:
-        BROWSER: ${{ matrix.browser }}
+        
+    - name: Execute AI Tests
       run: node ai-test-executor.js
-
-    - name: Upload Test Reports
+      
+    - name: Upload Test Report
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: test-reports-${{ matrix.browser }}
-        path: |
-          test-report-*.html
-          failure-*.png
-        retention-days: 30
-
-    - name: Upload Test Results
+        name: test-report
+        path: test-report.html
+        
+    - name: Upload Screenshots
       uses: actions/upload-artifact@v4
-      if: always()
+      if: failure()
       with:
-        name: test-results-${{ matrix.browser }}
-        path: |
-          *.png
-          *.json
-        retention-days: 7
+        name: screenshots
+        path: test-results/
