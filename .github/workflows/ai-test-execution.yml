@@ -90,13 +90,19 @@ jobs:
           try {
             for (const step of testCase.steps) {
               console.log(`  Step: ${step}`);
-              await executeStep(page, step);
-              result.steps.push({ step, status: 'PASS' });
+              try {
+                await executeStep(page, step);
+                result.steps.push({ step, status: 'PASS' });
+              } catch (stepError) {
+                result.status = 'FAIL';
+                result.error = stepError.message;
+                result.steps.push({ step: step, status: 'FAIL', error: stepError.message });
+                break; // Stop executing remaining steps if one fails
+              }
             }
           } catch (error) {
             result.status = 'FAIL';
             result.error = error.message;
-            result.steps.push({ step: step, status: 'FAIL', error: error.message });
           }
           
           return result;
