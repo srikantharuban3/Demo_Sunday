@@ -332,14 +332,7 @@ jobs:
                   </div>
                 </div>
               </div>
-                          ${step.error ? `<br><em>${step.error}</em>` : ''}
-                        </li>
-                      `).join('')}
-                    </ul>
-                  </details>
-                </div>
-              `).join('')}
-              
+
               <script>
                 const ctx = document.getElementById('resultsChart').getContext('2d');
                 new Chart(ctx, {
