@@ -27,9 +27,11 @@
 - submit the form by clicking on the register page. 
 - Verify that welcome message with the new username is displayed.
 
-## TC 002 - Verify member registration process
+## TC 002 - Verify user login functionality with valid credentials
 
-- Navigate to `https://parabank.parasoft.com/parabank`
-- Click on the register link
-- Fill the form and register the member
-- Verify that new member has been successfully registered
+- Navigate to `https://parabank.parasoft.com/parabank/index.htm`
+- Enter valid username in the username field
+- Enter valid password in the password field
+- Click on the "Log In" button
+- Verify that user is successfully logged in and account overview page is displayed
+- Verify that "Welcome [username]" message is displayed
