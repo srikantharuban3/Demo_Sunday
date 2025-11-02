@@ -156,6 +156,108 @@ jobs:
             if (!pageContent.includes('Account') && !pageContent.includes('Overview')) {
               throw new Error('Account overview page not displayed');
             }
+          } else if (step.includes('Click on "Open New Account"') || step.includes('Open New Account')) {
+            await page.click('a[href*="openaccount"], a:has-text("Open New Account")');
+          } else if (step.includes('Select account type')) {
+            await page.selectOption('select#type', 'SAVINGS');
+          } else if (step.includes('Click "Open New Account" button')) {
+            await page.click('input[type="submit"][value*="Open"], button:has-text("Open New Account")');
+          } else if (step.includes('Verify new account created')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('successfully') && !pageContent.includes('opened')) {
+              throw new Error('New account creation verification failed');
+            }
+          } else if (step.includes('Click on "Transfer Funds"') || step.includes('Transfer Funds')) {
+            await page.click('a[href*="transfer"], a:has-text("Transfer Funds")');
+          } else if (step.includes('Enter transfer amount')) {
+            await page.fill('input#amount', '100');
+          } else if (step.includes('Select from account')) {
+            await page.selectOption('select#fromAccountId', { index: 0 });
+          } else if (step.includes('Select to account')) {
+            await page.selectOption('select#toAccountId', { index: 1 });
+          } else if (step.includes('Click "Transfer" button')) {
+            await page.click('input[type="submit"][value*="Transfer"], button:has-text("Transfer")');
+          } else if (step.includes('Verify transfer successful')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('successfully') && !pageContent.includes('complete')) {
+              throw new Error('Transfer verification failed');
+            }
+          } else if (step.includes('Click on "Bill Pay"') || step.includes('Bill Pay')) {
+            await page.click('a[href*="billpay"], a:has-text("Bill Pay")');
+          } else if (step.includes('Enter payee name')) {
+            await page.fill('input[name="payee.name"]', 'Electric Company');
+          } else if (step.includes('Enter payee address')) {
+            await page.fill('input[name="payee.address.street"]', '123 Utility St');
+          } else if (step.includes('Enter payee city')) {
+            await page.fill('input[name="payee.address.city"]', 'Power City');
+          } else if (step.includes('Enter payee state')) {
+            await page.fill('input[name="payee.address.state"]', 'PC');
+          } else if (step.includes('Enter payee zip')) {
+            await page.fill('input[name="payee.address.zipCode"]', '12345');
+          } else if (step.includes('Enter payee phone')) {
+            await page.fill('input[name="payee.phoneNumber"]', '555-9876');
+          } else if (step.includes('Enter payee account')) {
+            await page.fill('input[name="payee.accountNumber"]', '987654321');
+          } else if (step.includes('Verify payee account')) {
+            await page.fill('input[name="verifyAccount"]', '987654321');
+          } else if (step.includes('Enter bill amount')) {
+            await page.fill('input[name="amount"]', '75.00');
+          } else if (step.includes('Click "Send Payment" button')) {
+            await page.click('input[type="submit"][value*="Send"], button:has-text("Send Payment")');
+          } else if (step.includes('Verify bill payment successful')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('successfully') && !pageContent.includes('sent')) {
+              throw new Error('Bill payment verification failed');
+            }
+          } else if (step.includes('Click on "Find Transactions"') || step.includes('Find Transactions')) {
+            await page.click('a[href*="findtrans"], a:has-text("Find Transactions")');
+          } else if (step.includes('Enter transaction ID')) {
+            await page.fill('input#criteria', '12345');
+          } else if (step.includes('Click "Find Transactions" button')) {
+            await page.click('input[type="submit"][value*="Find"], button:has-text("Find Transactions")');
+          } else if (step.includes('Verify transaction found')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('Transaction') && !pageContent.includes('Details')) {
+              throw new Error('Transaction search verification failed');
+            }
+          } else if (step.includes('Click on "Update Contact Info"') || step.includes('Update Contact Info')) {
+            await page.click('a[href*="updateprofile"], a:has-text("Update Contact Info")');
+          } else if (step.includes('Update first name')) {
+            await page.fill('input[name="customer.firstName"]', 'UpdatedName');
+          } else if (step.includes('Click "Update Profile" button')) {
+            await page.click('input[type="submit"][value*="Update"], button:has-text("Update Profile")');
+          } else if (step.includes('Verify profile updated')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('successfully') && !pageContent.includes('updated')) {
+              throw new Error('Profile update verification failed');
+            }
+          } else if (step.includes('Click on "Request Loan"') || step.includes('Request Loan')) {
+            await page.click('a[href*="requestloan"], a:has-text("Request Loan")');
+          } else if (step.includes('Enter loan amount')) {
+            await page.fill('input#amount', '1000');
+          } else if (step.includes('Enter down payment')) {
+            await page.fill('input#downPayment', '100');
+          } else if (step.includes('Click "Apply Now" button')) {
+            await page.click('input[type="submit"][value*="Apply"], button:has-text("Apply Now")');
+          } else if (step.includes('Verify loan application')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('processed') && !pageContent.includes('application')) {
+              throw new Error('Loan application verification failed');
+            }
+          } else if (step.includes('Click on "Log Out"') || step.includes('Log Out')) {
+            await page.click('a[href*="logout"], a:has-text("Log Out")');
+          } else if (step.includes('Verify user logged out')) {
+            await page.waitForSelector('body');
+            const pageContent = await page.textContent('body');
+            if (!pageContent.includes('Login') && !pageContent.includes('logged out')) {
+              throw new Error('Logout verification failed');
+            }
           }
           
           // Wait a bit between steps
