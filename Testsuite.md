@@ -35,3 +35,14 @@
 - Click on the "Log In" button
 - Verify that user is successfully logged in and account overview page is displayed
 - Verify that "Welcome [username]" message is displayed
+
+## TC 003 - Verify user can open a new account
+
+- Navigate to `https://parabank.parasoft.com/parabank/index.htm`
+- Enter valid username in the username field
+- Enter valid password in the password field
+- Click on the "Log In" button
+- Click on "Open New Account" link
+- Select account type as "SAVINGS"
+- Click "Open New Account" button
+- Verify new account created successfully
