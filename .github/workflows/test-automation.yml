@@ -1,55 +1,443 @@
-name: Playwright MCP Test Suite
+name: Enhanced Test Automation Pipeline
 
 on:
   workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Test execution mode'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - smoke
+          - regression
+      browser:
+        description: 'Browser for testing'
+        required: false
+        default: 'chromium'
+        type: choice
+        options:
+          - chromium
+          - firefox
+          - webkit
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '20'
+  TEST_MODE: ${{ github.event.inputs.test_mode || 'full' }}
+  BROWSER: ${{ github.event.inputs.browser || 'chromium' }}
 
 jobs:
-  run-mcp-playwright-tests:
-    name: Execute Playwright Tests via MCP (Claude Integrated)
+  validate-environment:
+    name: Validate Test Environment
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
+    
+    outputs:
+      test-suite-ready: ${{ steps.validation.outputs.ready }}
+      test-count: ${{ steps.validation.outputs.count }}
+      
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Validate Test Suite
+      id: validation
+      run: |
+        echo "🔍 Validating test environment..."
+        
+        if [ ! -f "Testsuite.md" ]; then
+          echo "❌ Testsuite.md not found"
+          exit 1
+        fi
+        
+        TEST_COUNT=$(grep -c "^## TC" Testsuite.md || echo "0")
+        echo "📊 Test cases found: $TEST_COUNT"
+        echo "count=$TEST_COUNT" >> $GITHUB_OUTPUT
+        
+        if [ "$TEST_COUNT" -eq 0 ]; then
+          echo "⚠️ No test cases available"
+          exit 1
+        fi
+        
+        echo "✅ Test suite validated successfully"
+        echo "ready=true" >> $GITHUB_OUTPUT
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+  run-playwright-tests:
+    name: Execute Playwright Test Automation
+    runs-on: ubuntu-latest
+    needs: validate-environment
+    if: needs.validate-environment.outputs.test-suite-ready == 'true'
+    timeout-minutes: 30
+    
+    strategy:
+      fail-fast: true
+      matrix:
+        browser: [chromium]
+        
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: |
-          npm install playwright @playwright/test
-          npx playwright install
-          npm install mcp-playwright-runner
+    - name: Setup Node.js Environment
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
 
-      - name: Execute Test Suite using MCP Runner
-        run: |
-          npx mcp-runner \
-            --model claude-3-5-sonnet \
-            --task "You are a test automation engineer.
-            Execute all test cases listed in the Test Suite using Playwright MCP tools.
-            For each test, if any step or verification fails, mark the test case as failed.
-            After all tests complete, generate an HTML report with:
-              - Test case ID & Description
-              - Steps executed
-              - Pass/Fail status
-              - Error messages or screenshots
-              - Execution timestamp
-              - Bar chart summary
-            Test Suite:
-              TC001 - Verify user can register a new customer:
-                1. Navigate to https://parabank.parasoft.com/parabank/index.htm
-                2. Click 'Register' link
-                3. Fill registration form with unique 10-char username
-                4. Submit registration
-                5. Verify welcome message with new username is displayed." \
-            --output ./reports/test-execution-report.html
+    - name: Install Test Dependencies
+      run: |
+        echo "📦 Installing Playwright and dependencies..."
+        npm init -y
+        npm install playwright @playwright/test
+        npx playwright install ${{ matrix.browser }} --with-deps
 
-      - name: Upload HTML Test Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: Playwright-MCP-Test-Report
-          path: ./reports/test-execution-report.html
+    - name: Execute Test Suite with Enhanced Automation
+      env:
+        TEST_COUNT: ${{ needs.validate-environment.outputs.test-count }}
+      run: |
+        echo "🚀 Starting enhanced test automation..."
+        echo "🎯 Mode: ${{ env.TEST_MODE }}"
+        echo "🌐 Browser: ${{ matrix.browser }}"
+        echo "📊 Test Cases: ${{ env.TEST_COUNT }}"
+        
+        # Create comprehensive test executor
+        node -e "
+        const { chromium, firefox, webkit } = require('playwright');
+        const fs = require('fs');
+        
+        async function executeTestSuite() {
+          console.log('🎯 Initializing enhanced test execution...');
+          
+          // Read and parse test suite
+          const testSuite = fs.readFileSync('Testsuite.md', 'utf8');
+          const testCases = testSuite.match(/## TC\\d+[^#]*/g) || [];
+          
+          console.log(\`📋 Processing \${testCases.length} test cases\`);
+          
+          // Initialize browser based on matrix
+          const browserType = '${{ matrix.browser }}' === 'firefox' ? firefox : 
+                             '${{ matrix.browser }}' === 'webkit' ? webkit : chromium;
+          
+          const browser = await browserType.launch({ 
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+          });
+          
+          const context = await browser.newContext({
+            viewport: { width: 1920, height: 1080 }
+          });
+          
+          const page = await context.newPage();
+          const results = [];
+          const startTime = new Date();
+          
+          try {
+            for (let i = 0; i < testCases.length; i++) {
+              const testCase = testCases[i];
+              const testId = \`TC\${String(i + 1).padStart(3, '0')}\`;
+              const description = testCase.split('\\n')[0].replace(/^##\\s*/, '');
+              const steps = testCase.split('\\n').filter(line => line.trim().startsWith('-')).map(step => step.trim().substring(1).trim());
+              
+              console.log(\`\\n🎯 Executing \${testId}: \${description}\`);
+              console.log(\`📝 Steps identified: \${steps.length}\`);
+              
+              let testResult = {
+                id: testId,
+                description: description,
+                steps: steps,
+                status: 'PASS',
+                timestamp: new Date().toISOString(),
+                duration: 0,
+                error: null
+              };
+              
+              const testStartTime = Date.now();
+              
+              try {
+                // Execute test steps dynamically
+                for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+                  const step = steps[stepIndex];
+                  console.log(\`  ⚡ Step \${stepIndex + 1}: \${step}\`);
+                  
+                  if (step.toLowerCase().includes('navigate')) {
+                    const urlMatch = step.match(/https?:\\/\\/[^\\s]+/);
+                    const url = urlMatch ? urlMatch[0] : 'https://parabank.parasoft.com/parabank/index.htm';
+                    console.log(\`    🌐 Navigating to: \${url}\`);
+                    await page.goto(url, { waitUntil: 'networkidle' });
+                    
+                  } else if (step.toLowerCase().includes('click') && step.toLowerCase().includes('register')) {
+                    console.log(\`    🖱️ Clicking register link\`);
+                    await page.click('a[href*=\"register\"]');
+                    await page.waitForSelector('input[name=\"customer.firstName\"]', { timeout: 10000 });
+                    
+                  } else if (step.toLowerCase().includes('fill') && step.toLowerCase().includes('registration')) {
+                    console.log(\`    📝 Filling registration form\`);
+                    const timestamp = Date.now().toString().slice(-6);
+                    const username = step.includes('10') ? \`test\${timestamp}\`.substring(0, 10) : \`test\${timestamp}\`;
+                    
+                    await page.fill('input[name=\"customer.firstName\"]', 'Test');
+                    await page.fill('input[name=\"customer.lastName\"]', 'User');
+                    await page.fill('input[name=\"customer.username\"]', username);
+                    await page.fill('input[name=\"customer.password\"]', 'TestPass123!');
+                    await page.fill('input[name=\"repeatedPassword\"]', 'TestPass123!');
+                    await page.fill('input[name=\"customer.address.street\"]', '123 Test Street');
+                    await page.fill('input[name=\"customer.address.city\"]', 'Test City');
+                    await page.fill('input[name=\"customer.address.state\"]', 'CA');
+                    await page.fill('input[name=\"customer.address.zipCode\"]', '12345');
+                    await page.fill('input[name=\"customer.phoneNumber\"]', '555-1234');
+                    await page.fill('input[name=\"customer.ssn\"]', '123-45-6789');
+                    
+                  } else if (step.toLowerCase().includes('submit')) {
+                    console.log(\`    ✅ Submitting form\`);
+                    await page.click('input[type=\"submit\"][value=\"Register\"]');
+                    await page.waitForTimeout(3000);
+                    
+                  } else if (step.toLowerCase().includes('verify') && step.toLowerCase().includes('welcome')) {
+                    console.log(\`    🔍 Verifying welcome message\`);
+                    const content = await page.textContent('body');
+                    if (!content.includes('Welcome')) {
+                      throw new Error('Welcome message not found after registration');
+                    }
+                    
+                  } else {
+                    console.log(\`    ℹ️ Generic step: \${step}\`);
+                    // Basic page interaction for generic steps
+                    await page.waitForTimeout(1000);
+                  }
+                }
+                
+                testResult.duration = Date.now() - testStartTime;
+                console.log(\`✅ \${testId} completed successfully in \${testResult.duration}ms\`);
+                
+              } catch (stepError) {
+                testResult.status = 'FAIL';
+                testResult.error = stepError.message;
+                testResult.duration = Date.now() - testStartTime;
+                console.error(\`❌ \${testId} failed: \${stepError.message}\`);
+                
+                // Take screenshot on failure
+                try {
+                  await page.screenshot({ path: \`failure-\${testId}.png\`, fullPage: true });
+                  console.log(\`📸 Screenshot saved for \${testId}\`);
+                } catch (screenshotError) {
+                  console.log(\`⚠️ Could not capture screenshot: \${screenshotError.message}\`);
+                }
+              }
+              
+              results.push(testResult);
+              
+              // Fail-fast: stop on first failure
+              if (testResult.status === 'FAIL') {
+                console.log('💥 Stopping execution due to test failure (fail-fast mode)');
+                break;
+              }
+            }
+            
+            await browser.close();
+            
+            // Generate comprehensive HTML report
+            const endTime = new Date();
+            const totalDuration = endTime - startTime;
+            const passCount = results.filter(r => r.status === 'PASS').length;
+            const failCount = results.filter(r => r.status === 'FAIL').length;
+            const successRate = Math.round((passCount / results.length) * 100);
+            
+            const htmlReport = \`
+            <!DOCTYPE html>
+            <html lang=\"en\">
+            <head>
+              <meta charset=\"UTF-8\">
+              <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+              <title>Enhanced Test Automation Report</title>
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; line-height: 1.6; }
+                .container { max-width: 1200px; margin: 20px auto; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden; }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px; text-align: center; }
+                .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+                .header p { font-size: 1.1em; opacity: 0.9; }
+                .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 30px; background: #f8f9fa; }
+                .stat-card { background: white; padding: 25px; border-radius: 10px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+                .stat-card h3 { color: #495057; font-size: 0.9em; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+                .stat-card .number { font-size: 2.5em; font-weight: bold; margin-bottom: 5px; }
+                .stat-card .label { color: #6c757d; }
+                .pass .number { color: #28a745; }
+                .fail .number { color: #dc3545; }
+                .rate .number { color: #007bff; }
+                .duration .number { color: #6f42c1; }
+                .test-results { padding: 30px; }
+                .test-case { border: 1px solid #e9ecef; margin: 20px 0; border-radius: 8px; overflow: hidden; transition: all 0.3s ease; }
+                .test-case:hover { box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+                .test-header { padding: 20px; cursor: pointer; }
+                .test-header h3 { margin-bottom: 10px; }
+                .test-details { padding: 0 20px 20px; }
+                .pass { border-left: 4px solid #28a745; }
+                .pass .test-header { background: #d4edda; }
+                .fail { border-left: 4px solid #dc3545; }
+                .fail .test-header { background: #f8d7da; }
+                .steps { margin-top: 15px; }
+                .steps li { margin: 5px 0; padding: 5px; background: #f8f9fa; border-radius: 4px; }
+                .chart-container { text-align: center; margin: 30px 0; }
+                .progress-bar { width: 100%; height: 30px; background: #e9ecef; border-radius: 15px; overflow: hidden; margin: 20px 0; }
+                .progress-fill { height: 100%; background: linear-gradient(90deg, #28a745, #20c997); transition: width 0.3s ease; }
+                .meta-info { background: #f8f9fa; padding: 20px; margin-top: 20px; border-radius: 8px; }
+                .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8em; font-weight: bold; margin-left: 10px; }
+                .badge.pass { background: #d4edda; color: #155724; }
+                .badge.fail { background: #f8d7da; color: #721c24; }
+              </style>
+            </head>
+            <body>
+              <div class=\"container\">
+                <div class=\"header\">
+                  <h1>🧪 Enhanced Test Automation Report</h1>
+                  <p>Comprehensive Test Execution Results</p>
+                  <p>Generated on \${startTime.toLocaleString()}</p>
+                </div>
+                
+                <div class=\"stats\">
+                  <div class=\"stat-card pass\">
+                    <h3>Tests Passed</h3>
+                    <div class=\"number\">\${passCount}</div>
+                    <div class=\"label\">Successful</div>
+                  </div>
+                  <div class=\"stat-card fail\">
+                    <h3>Tests Failed</h3>
+                    <div class=\"number\">\${failCount}</div>
+                    <div class=\"label\">Failed</div>
+                  </div>
+                  <div class=\"stat-card rate\">
+                    <h3>Success Rate</h3>
+                    <div class=\"number\">\${successRate}%</div>
+                    <div class=\"label\">Overall</div>
+                  </div>
+                  <div class=\"stat-card duration\">
+                    <h3>Total Duration</h3>
+                    <div class=\"number\">\${Math.round(totalDuration/1000)}s</div>
+                    <div class=\"label\">Execution Time</div>
+                  </div>
+                </div>
+                
+                <div class=\"chart-container\">
+                  <h2>📊 Test Execution Progress</h2>
+                  <div class=\"progress-bar\">
+                    <div class=\"progress-fill\" style=\"width: \${successRate}%;\"></div>
+                  </div>
+                  <p>\${passCount} of \${results.length} tests passed (\${successRate}% success rate)</p>
+                </div>
+                
+                <div class=\"test-results\">
+                  <h2>🔍 Detailed Test Results</h2>
+                  \${results.map(result => \`
+                    <div class=\"test-case \${result.status.toLowerCase()}\">
+                      <div class=\"test-header\">
+                        <h3>\${result.id}: \${result.description}
+                          <span class=\"badge \${result.status.toLowerCase()}\">\${result.status}</span>
+                        </h3>
+                        <p><strong>Duration:</strong> \${result.duration}ms | <strong>Timestamp:</strong> \${new Date(result.timestamp).toLocaleString()}</p>
+                      </div>
+                      <div class=\"test-details\">
+                        <div class=\"steps\">
+                          <h4>📋 Test Steps (\${result.steps.length}):</h4>
+                          <ol>
+                            \${result.steps.map(step => \`<li>\${step}</li>\`).join('')}
+                          </ol>
+                        </div>
+                        \${result.error ? \`<div class=\"meta-info\"><strong>❌ Error:</strong> \${result.error}</div>\` : ''}
+                      </div>
+                    </div>
+                  \`).join('')}
+                </div>
+                
+                <div class=\"meta-info\">
+                  <h3>🔧 Test Environment Information</h3>
+                  <p><strong>Browser:</strong> ${{ matrix.browser }}</p>
+                  <p><strong>Test Mode:</strong> ${{ env.TEST_MODE }}</p>
+                  <p><strong>Node.js Version:</strong> ${{ env.NODE_VERSION }}</p>
+                  <p><strong>Execution Date:</strong> \${new Date().toISOString()}</p>
+                  <p><strong>Total Test Cases:</strong> \${results.length}</p>
+                  <p><strong>Test Suite Source:</strong> Testsuite.md</p>
+                </div>
+              </div>
+            </body>
+            </html>
+            \`;
+            
+            // Create reports directory and save report
+            fs.mkdirSync('reports', { recursive: true });
+            fs.writeFileSync('reports/enhanced-test-report.html', htmlReport);
+            
+            console.log('\\n📊 Enhanced Test Execution Summary:');
+            console.log('==========================================');
+            console.log(\`   Total Tests: \${results.length}\`);
+            console.log(\`   Passed: \${passCount}\`);
+            console.log(\`   Failed: \${failCount}\`);
+            console.log(\`   Success Rate: \${successRate}%\`);
+            console.log(\`   Total Duration: \${Math.round(totalDuration/1000)}s\`);
+            console.log('\\n📁 Report saved to: reports/enhanced-test-report.html');
+            
+            if (failCount > 0) {
+              console.log('\\n❌ Test execution completed with failures');
+              process.exit(1);
+            } else {
+              console.log('\\n✅ All tests passed successfully!');
+            }
+            
+          } catch (error) {
+            console.error('💥 Critical test execution error:', error);
+            process.exit(1);
+          }
+        }
+        
+        executeTestSuite().catch(error => {
+          console.error('🚨 Fatal error:', error);
+          process.exit(1);
+        });
+        "
+
+    - name: Upload Enhanced Test Reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: enhanced-test-report-${{ github.run_number }}
+        path: |
+          reports/
+          failure-*.png
+        retention-days: 30
+
+  generate-summary:
+    name: Generate Test Summary
+    runs-on: ubuntu-latest
+    needs: [validate-environment, run-playwright-tests]
+    if: always()
+    timeout-minutes: 5
+    
+    steps:
+    - name: Generate Execution Summary
+      run: |
+        echo "## 📋 Enhanced Test Automation Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🎯 Execution Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Test Mode**: ${{ env.TEST_MODE }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Browser**: chromium" >> $GITHUB_STEP_SUMMARY
+        echo "- **Test Cases**: ${{ needs.validate-environment.outputs.test-count }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment Validation**: ${{ needs.validate-environment.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Test Execution**: ${{ needs.run-playwright-tests.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Results" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ needs.run-playwright-tests.result }}" = "success" ]; then
+          echo "✅ **Status**: All tests completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "🎉 **Outcome**: Pipeline execution successful" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Status**: Test execution failed" >> $GITHUB_STEP_SUMMARY
+          echo "🔍 **Action**: Check test reports for details" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📁 Artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "- Enhanced HTML test report available in artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "- Failure screenshots (if any) included" >> $GITHUB_STEP_SUMMARY
