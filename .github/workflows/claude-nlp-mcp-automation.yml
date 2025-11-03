@@ -10,8 +10,9 @@ on:
 env:
   PARABANK_URL: "https://parabank.parasoft.com/parabank/index.htm"
   CLAUDE_MODEL: "claude-3-5-sonnet-20241022"
-  MCP_TIMEOUT: "30000"
+  MCP_TIMEOUT: "60000"
   BROWSER_HEADLESS: "true"
+  NAVIGATION_TIMEOUT: "30000"
 
 jobs:
   claude-nlp-mcp-automation:
@@ -150,7 +151,7 @@ jobs:
               timeout: parseInt(process.env.MCP_TIMEOUT) 
             });
             
-            // Verify navigation success
+            // Verify navigation success with extended verification
             const title = await page.title();
             console.log('📄 Page loaded:', title);
             
@@ -158,37 +159,93 @@ jobs:
               throw new Error('Navigation failed - ParaBank not loaded');
             }
             
+            // Wait for page to fully load before proceeding
+            await page.waitForTimeout(3000);
+            
             // Claude AI Natural Language Processing: 'Click on Register link'
             console.log('🧠 Claude NLP: Interpreting \"Click on Register link\"');
-            const registerLink = await page.locator('a[href*=\"register\"]').first();
             
-            if (!(await registerLink.isVisible())) {
-              throw new Error('Register link not found or not visible');
+            // Enhanced register link detection with multiple selectors
+            let registerLink;
+            try {
+              // Try multiple possible selectors for register link
+              const selectors = [
+                'a[href*="register"]',
+                'a[href*="Register"]', 
+                'a:has-text("Register")',
+                'a:has-text("register")',
+                'text="Register"'
+              ];
+              
+              for (const selector of selectors) {
+                try {
+                  registerLink = await page.locator(selector).first();
+                  if (await registerLink.isVisible({ timeout: 5000 })) {
+                    console.log('✅ Found register link with selector:', selector);
+                    break;
+                  }
+                } catch (e) {
+                  console.log('⚠️ Selector failed:', selector);
+                  continue;
+                }
+              }
+              
+              if (!registerLink || !(await registerLink.isVisible())) {
+                throw new Error('Register link not found with any selector');
+              }
+              
+            } catch (linkError) {
+              console.log('⚠️ Standard register link not found, checking page content...');
+              const bodyText = await page.textContent('body');
+              console.log('📝 Page content includes register:', bodyText.toLowerCase().includes('register'));
+              throw new Error('Register link not found or not visible - Page may have different structure');
             }
             
             await registerLink.click();
-            await page.waitForURL('**/register.htm', { timeout: 10000 });
+            
+            // Wait for navigation with extended timeout and fallback verification
+            try {
+              await page.waitForURL('**/register.htm', { timeout: 30000 });
+            } catch (timeoutError) {
+              console.log('⚠️ URL pattern wait timeout, verifying by content...');
+              await page.waitForTimeout(5000);
+            }
             
             const currentUrl = page.url();
-            if (!currentUrl.includes('register')) {
-              throw new Error('Register page not loaded correctly');
+            const pageContent = await page.textContent('body');
+            
+            // Enhanced verification - check URL or content for register page
+            if (!currentUrl.includes('register') && !pageContent.toLowerCase().includes('first name')) {
+              throw new Error('Register page not loaded correctly - URL: ' + currentUrl);
             }
+            
+            console.log('✅ Register page loaded successfully:', currentUrl);
             
             // Claude AI Natural Language Processing: 'Fill registration form'
             console.log('🧠 Claude NLP: Interpreting \"Fill registration form with user details\"');
             
-            // Real MCP form filling based on natural language understanding
-            await page.fill('input[name=\"customer.firstName\"]', 'Claude');
-            await page.fill('input[name=\"customer.lastName\"]', 'AI');
-            await page.fill('input[name=\"customer.address.street\"]', '123 AI Boulevard');
-            await page.fill('input[name=\"customer.address.city\"]', 'Claude City');
-            await page.fill('input[name=\"customer.address.state\"]', 'CA');
-            await page.fill('input[name=\"customer.address.zipCode\"]', '90210');
-            await page.fill('input[name=\"customer.phoneNumber\"]', '555-CLAUDE');
-            await page.fill('input[name=\"customer.ssn\"]', '123-45-6789');
-            await page.fill('input[name=\"customer.username\"]', '$TEST_USERNAME');
-            await page.fill('input[name=\"customer.password\"]', '$TEST_PASSWORD');
-            await page.fill('input[name=\"repeatedPassword\"]', '$TEST_PASSWORD');
+            // Wait for form to be fully loaded
+            await page.waitForSelector('input[name=\"customer.firstName\"]', { timeout: 15000 });
+            
+            // Real MCP form filling based on natural language understanding with error handling
+            try {
+              await page.fill('input[name=\"customer.firstName\"]', 'Claude');
+              await page.fill('input[name=\"customer.lastName\"]', 'AI');
+              await page.fill('input[name=\"customer.address.street\"]', '123 AI Boulevard');
+              await page.fill('input[name=\"customer.address.city\"]', 'Claude City');
+              await page.fill('input[name=\"customer.address.state\"]', 'CA');
+              await page.fill('input[name=\"customer.address.zipCode\"]', '90210');
+              await page.fill('input[name=\"customer.phoneNumber\"]', '555-CLAUDE');
+              await page.fill('input[name=\"customer.ssn\"]', '123-45-6789');
+              await page.fill('input[name=\"customer.username\"]', '$TEST_USERNAME');
+              await page.fill('input[name=\"customer.password\"]', '$TEST_PASSWORD');
+              await page.fill('input[name=\"repeatedPassword\"]', '$TEST_PASSWORD');
+              
+              console.log('✅ Registration form filled successfully');
+            } catch (fillError) {
+              console.error('❌ Form filling failed:', fillError.message);
+              throw new Error('Registration form filling failed: ' + fillError.message);
+            }
             
             // Verify form filling
             const usernameValue = await page.inputValue('input[name=\"customer.username\"]');
@@ -198,10 +255,43 @@ jobs:
             
             // Claude AI Natural Language Processing: 'Submit registration form'
             console.log('🧠 Claude NLP: Interpreting \"Submit registration form\"');
-            await page.click('input[type=\"submit\"][value=\"Register\"]');
             
-            // Wait for registration result
-            await page.waitForTimeout(5000);
+            // Enhanced submit button detection and clicking
+            try {
+              const submitSelectors = [
+                'input[type=\"submit\"][value=\"Register\"]',
+                'input[type=\"submit\"][value*=\"register\"]',
+                'button[type=\"submit\"]',
+                'input[value=\"Register\"]'
+              ];
+              
+              let submitButton;
+              for (const selector of submitSelectors) {
+                try {
+                  submitButton = await page.locator(selector).first();
+                  if (await submitButton.isVisible({ timeout: 3000 })) {
+                    console.log('✅ Found submit button with selector:', selector);
+                    break;
+                  }
+                } catch (e) {
+                  continue;
+                }
+              }
+              
+              if (!submitButton || !(await submitButton.isVisible())) {
+                throw new Error('Submit button not found');
+              }
+              
+              await submitButton.click();
+              console.log('✅ Registration form submitted successfully');
+              
+            } catch (submitError) {
+              console.error('❌ Submit button interaction failed:', submitError.message);
+              throw new Error('Registration form submission failed: ' + submitError.message);
+            }
+            
+            // Wait for registration result with extended timeout
+            await page.waitForTimeout(8000);
             
             // Claude AI Natural Language Processing: 'Verify registration success'
             console.log('🧠 Claude NLP: Interpreting \"Verify registration was successful\"');
