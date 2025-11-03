@@ -1,0 +1,55 @@
+name: Playwright MCP Test Suite
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  run-mcp-playwright-tests:
+    name: Execute Playwright Tests via MCP (Claude Integrated)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: |
+          npm install playwright @playwright/test
+          npx playwright install
+          npm install mcp-playwright-runner
+
+      - name: Execute Test Suite using MCP Runner
+        run: |
+          npx mcp-runner \
+            --model claude-3-5-sonnet \
+            --task "You are a test automation engineer.
+            Execute all test cases listed in the Test Suite using Playwright MCP tools.
+            For each test, if any step or verification fails, mark the test case as failed.
+            After all tests complete, generate an HTML report with:
+              - Test case ID & Description
+              - Steps executed
+              - Pass/Fail status
+              - Error messages or screenshots
+              - Execution timestamp
+              - Bar chart summary
+            Test Suite:
+              TC001 - Verify user can register a new customer:
+                1. Navigate to https://parabank.parasoft.com/parabank/index.htm
+                2. Click 'Register' link
+                3. Fill registration form with unique 10-char username
+                4. Submit registration
+                5. Verify welcome message with new username is displayed." \
+            --output ./reports/test-execution-report.html
+
+      - name: Upload HTML Test Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Playwright-MCP-Test-Report
+          path: ./reports/test-execution-report.html
